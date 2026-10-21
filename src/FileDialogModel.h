@@ -36,6 +36,7 @@ public:
     void setPreview(int row, const QImage &img);
     QImage previewAt(int row) const;
     void updateVisibleColumns(const QVector<int> &orderedVisibleCols);
+    const QVector<int> &visibleColumns() const { return visibleCols_; }
 
     int rowCount(const QModelIndex &parent = {}) const override;
     int columnCount(const QModelIndex &parent = {}) const override;

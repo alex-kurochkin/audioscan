@@ -72,41 +72,42 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const {
 
     if (role == Qt::ForegroundRole && r.broken)
         return QColor(220, 40, 40);   // broken files in red (spec 2.4/3.3)
-    if (role != Qt::DisplayRole && role != Qt::DecorationRole && role != Qt::ToolTipRole)
+    if (role != Qt::DisplayRole)
         return {};
 
     if (r.broken) {
         // Broken rows still show basic filesystem info (name, size, dates),
         // only audio params and preview are omitted (spec 3.3).
-        if (role != Qt::DisplayRole) return {};
         switch (col) {
         case ColName:     return r.name;
-        case ColSize:     return QLocale().formattedDataSize(r.size);
-        case ColCreated:  return r.created.isValid() ? r.created.toString(Qt::ISODate) : QVariant();
-        case ColModified: return r.modified.isValid() ? r.modified.toString(Qt::ISODate) : QVariant();
-        default:          return {};
+        case ColSize:     return r.size > 0 ? QLocale().formattedDataSize(r.size) : QVariant();
+        case ColCreated:  return r.created.isValid() ? r.created.toString(QStringLiteral("yyyy-MM-dd HH:mm")) : QVariant();
+        case ColModified: return r.modified.isValid() ? r.modified.toString(QStringLiteral("yyyy-MM-dd HH:mm")) : QVariant();
+        default:          return QVariant();
         }
     }
 
     switch (col) {
-    case ColName:     return role == Qt::DisplayRole ? r.name : QVariant();
+    case ColName:     return r.name;
     case ColPreview:
-        if (role == Qt::DecorationRole) return r.preview;
-        if (role == Qt::DisplayRole && !r.previewLoaded)
+        if (!r.previewLoaded)
             Q_EMIT const_cast<FileTableModel *>(this)->previewRequested(index.row());
-        return {};
+        return QVariant();
     case ColDuration: {
-        double sec = r.sampleRate ? double(r.frames) / r.sampleRate : 0.0;
-        int mm = int(sec) / 60, ss = int(sec) % 60;
-        return QStringLiteral("%1:%2").arg(mm).arg(ss, 2, 10, QLatin1Char('0'));
+        if (!r.sampleRate || r.frames <= 0) return QStringLiteral("--:--");
+        double sec = double(r.frames) / r.sampleRate;
+        int hh = int(sec) / 3600, mm = (int(sec) / 60) % 60, ss = int(sec) % 60;
+        return hh > 0
+            ? QStringLiteral("%1:%2:%3").arg(hh).arg(mm, 2, 10, QLatin1Char('0')).arg(ss, 2, 10, QLatin1Char('0'))
+            : QStringLiteral("%1:%2").arg(mm).arg(ss, 2, 10, QLatin1Char('0'));
     }
-    case ColSampleRate: return QLocale().toString(r.sampleRate);
-    case ColSampleType: return r.sampleTypeName;
-    case ColChannels:   return r.channels;
-    case ColSize:       return QLocale().formattedDataSize(r.size);
-    case ColComment:    return role == Qt::DisplayRole ? r.comment : QVariant();
-    case ColCreated:    return r.created.toString(Qt::ISODate);
-    case ColModified:   return r.modified.toString(Qt::ISODate);
+    case ColSampleRate: return r.sampleRate > 0 ? QLocale().toString(r.sampleRate) : QStringLiteral("-");
+    case ColSampleType: return r.sampleTypeName.isEmpty() ? QStringLiteral("-") : r.sampleTypeName;
+    case ColChannels:   return r.channels > 0 ? QString::number(r.channels) : QStringLiteral("-");
+    case ColSize:       return r.size > 0 ? QLocale().formattedDataSize(r.size) : QStringLiteral("-");
+    case ColComment:    return r.comment;   // may legitimately be empty
+    case ColCreated:    return r.created.isValid() ? r.created.toString(QStringLiteral("yyyy-MM-dd HH:mm")) : QStringLiteral("-");
+    case ColModified:   return r.modified.isValid() ? r.modified.toString(QStringLiteral("yyyy-MM-dd HH:mm")) : QStringLiteral("-");
     }
     return {};
 }

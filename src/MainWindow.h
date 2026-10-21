@@ -64,6 +64,7 @@ private slots:
 
 private:
     void buildUi();
+    void applyTableColumnWidths();   // per-model-column widths after reset/move
     void requestPreview(int row);
     bool editGuarded();          // checks editable format + write perms
     void persistMarkers();

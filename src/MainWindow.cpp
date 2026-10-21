@@ -304,6 +304,12 @@ void MainWindow::buildUi() {
     table_->setIconSize(QSize(340, 20));
     table_->setColumnWidth(0, 220);
     table_->horizontalHeader()->setStretchLastSection(true);
+    // Give every column enough width so its content is actually visible.
+    table_->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    static const int kColW[FileTableModel::ColCount] =
+        {220, 350, 70, 90, 90, 80, 90, 140, 130, 130};
+    for (int c = 0; c < FileTableModel::ColCount; ++c)
+        table_->setColumnWidth(c, kColW[c]);
     rightLay->addWidget(table_, 1);
     splitter->addWidget(rightPanel);
     splitter->setSizes({260, 900});
@@ -318,6 +324,12 @@ void MainWindow::buildUi() {
     // into the player (spec: file load via double click).
     connect(table_, &QTableView::doubleClicked,
             this, &MainWindow::onRowDoubleClicked);
+    // After a header drag-reorder or any model reset/sort, re-apply sensible
+    // widths to the visual sections (model columns may have moved around).
+    connect(table_->horizontalHeader(), &QHeaderView::sectionMoved,
+            this, [this] { applyTableColumnWidths(); });
+    connect(model_, &QAbstractItemModel::modelReset,
+            this, [this] { QTimer::singleShot(0, this, [this] { applyTableColumnWidths(); }); });
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
 
     // ---- action panel (active file) — inside the resizable lower pane ----
@@ -616,12 +628,28 @@ void MainWindow::onScanFinished(DirScanResult res) {
         .arg(res.dir).arg(res.rows.size()).arg(ok).arg(brokenCnt));
     model_->setRows(res.rows);
     model_->sort(FileTableModel::ColName, Qt::AscendingOrder);
+    applyTableColumnWidths();
     // lazy prefetch of first N previews (spec 2.4)
     int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(res.rows.size()));
     const QString mode = Settings::instance().tablePreviewMode();
     for (int i = 0; i < n; ++i)
         if (!res.rows[i].broken)
             requestPreview(i);
+}
+
+// Set a comfortable width for every visible section, mapping the visual
+// section back to its model column via the header's logical index.
+void MainWindow::applyTableColumnWidths() {
+    static const int kColW[FileTableModel::ColCount] =
+        {220, 350, 70, 90, 90, 80, 90, 140, 130, 130};
+    if (!table_ || !model_) return;
+    for (int vis = 0; vis < model_->columnCount(); ++vis) {
+        int logical = table_->horizontalHeader()->logicalIndex(vis);
+        if (logical < 0) continue;
+        int modelCol = model_->visibleColumns().value(logical, -1);
+        if (modelCol >= 0 && modelCol < int(FileTableModel::ColCount))
+            table_->setColumnWidth(logical, kColW[modelCol]);
+    }
 }
 
 void MainWindow::requestPreview(int row) {
