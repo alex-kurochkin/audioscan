@@ -42,7 +42,7 @@ private slots:
     void onDirSelected(const QString &path);
     void onScanFinished(DirScanResult res);
     void onSearchClicked();
-    void onRowClicked();
+    void onRowDoubleClicked();
     void loadCurrentFile();
     void playPause();
     void stopPlayback();

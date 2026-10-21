@@ -314,8 +314,10 @@ void MainWindow::buildUi() {
     connect(tree_, &QTreeView::expanded, this, [this](const QModelIndex &i) {
         onDirSelected(fsModel_->filePath(i));
     });
-    connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged,
-            this, &MainWindow::onRowClicked);
+    // Single click only highlights the row; double click loads the file
+    // into the player (spec: file load via double click).
+    connect(table_, &QTableView::doubleClicked,
+            this, &MainWindow::onRowDoubleClicked);
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
 
     // ---- action panel (active file) — inside the resizable lower pane ----
@@ -651,7 +653,18 @@ int MainWindow::currentRow() const {
     return sel.isValid() ? sel.row() : -1;
 }
 
-void MainWindow::onRowClicked() {
+void MainWindow::onRowDoubleClicked() {
+    // If a different file is selected while playback is running, stop the
+    // player and reset the cursor to the beginning of the newly loaded file.
+    int row = currentRow();
+    if (row >= 0 && row < model_->rows().size()) {
+        const QString &newPath = model_->rows()[row].path;
+        if (player_.isPlaying() || playProc_ || newPath != currentPath_) {
+            player_.stop();
+            stopFfmpegFallback();
+            playBtn_->setText(tr("Play"));
+        }
+    }
     loadCurrentFile();
 }
 
