@@ -17,12 +17,48 @@
 #include <QInputDialog>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStorageInfo>
+#include <QThread>
+#include <QTimer>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QThreadPool>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
+
+// Directory tree model: only directories are listed (spec 2.3), and their
+// names are always visible even before the async filesystem watcher has
+// populated them (QFileSystemModel returns empty DisplayRole data for
+// not-yet-indexed entries — we fall back to QFileInfo).
+class DirTreeModel : public QFileSystemModel {
+public:
+    explicit DirTreeModel(QObject *parent = nullptr) : QFileSystemModel(parent) {
+        setNameFilterDisables(false);
+        setFilter(QDir::Dirs | QDir::Drives | QDir::NoDotAndDotDot);
+    }
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override {
+        if (!index.isValid()) return {};
+        if (role == Qt::DecorationRole && index.column() == 0)
+            return QFileSystemModel::data(index, role);
+        if (role != Qt::DisplayRole && role != Qt::EditRole) return {};
+        QString name = QFileSystemModel::data(index, role).toString();
+        if (name.isEmpty())
+            name = QFileInfo(filePath(index)).fileName();
+        if (name.isEmpty() && !filePath(index).isEmpty())
+            name = filePath(index);   // root
+        return name;
+    }
+    Qt::ItemFlags flags(const QModelIndex &index) const override {
+        if (!index.isValid()) return Qt::NoItemFlags;
+        return QFileSystemModel::flags(index) | Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    }
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override {
+        QFileInfo fi = fileInfo(index(sourceRow, 0, sourceParent));
+        return fi.isDir();
+    }
+};
 
 // ---------------- helpers ----------------
 
@@ -61,7 +97,7 @@ void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("AudioScout"));
     resize(1280, 860);
 
-    fsModel_ = new QFileSystemModel(this);
+    fsModel_ = new DirTreeModel(this);
     fsModel_->setRootPath(QDir::rootPath());
     fsModel_->setNameFilterDisables(false);
 
@@ -114,8 +150,10 @@ void MainWindow::buildUi() {
     });
 
     // ---- splitter: tree | table ----
-    auto *splitter = new QSplitter(Qt::Horizontal, central);
-    outer->addWidget(splitter, 1);
+    auto *mainSplit = new QSplitter(Qt::Vertical, central);
+    outer->addWidget(mainSplit, 1);
+
+    auto *splitter = new QSplitter(Qt::Horizontal, mainSplit);
 
     tree_ = new QTreeView(splitter);
     tree_->setModel(fsModel_);
@@ -154,8 +192,13 @@ void MainWindow::buildUi() {
             this, &MainWindow::onRowClicked);
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
 
-    // ---- action panel (active file) ----
-    auto *actionsBar = new QWidget(central);
+    // ---- action panel (active file) — inside the resizable lower pane ----
+    auto *lowerPane = new QWidget(mainSplit);
+    auto *lowerLay = new QVBoxLayout(lowerPane);
+    lowerLay->setContentsMargins(0, 0, 0, 0);
+    lowerLay->setSpacing(2);
+
+    auto *actionsBar = new QWidget(lowerPane);
     auto *ab = new QHBoxLayout(actionsBar);
     ab->setContentsMargins(0, 2, 0, 2);
     auto *muteBtn = new QPushButton(tr("Mute"), actionsBar);
@@ -174,7 +217,7 @@ void MainWindow::buildUi() {
     ab->addWidget(delAllMarksBtn);
     ab->addWidget(renameBtn);
     ab->addStretch(1);
-    outer->addWidget(actionsBar);
+    lowerLay->addWidget(actionsBar);
 
     connect(muteBtn, &QPushButton::clicked, this, &MainWindow::doMute);
     connect(normBtn, &QPushButton::clicked, this, &MainWindow::doNormalize);
@@ -183,7 +226,7 @@ void MainWindow::buildUi() {
     connect(renameBtn, &QPushButton::clicked, this, &MainWindow::renameCurrentFile);
 
     // ---- player bar ----
-    auto *playerBar = new QWidget(central);
+    auto *playerBar = new QWidget(lowerPane);
     auto *pb = new QHBoxLayout(playerBar);
     pb->setContentsMargins(0, 2, 0, 2);
     auto *prevBtn = new QPushButton(tr("|<"), playerBar);
@@ -216,7 +259,7 @@ void MainWindow::buildUi() {
     pb->addStretch(1);
     pb->addWidget(zin);
     pb->addWidget(zout);
-    outer->addWidget(playerBar);
+    lowerLay->addWidget(playerBar);
 
     connect(prevBtn, &QPushButton::clicked, this, &MainWindow::prevFile);
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
@@ -235,8 +278,12 @@ void MainWindow::buildUi() {
     connect(zout, &QPushButton::clicked, view_, &AudioView::zoomOut);
 
     // ---- visualization area ----
-    view_ = new AudioView(central);
-    outer->addWidget(view_, 2);
+    view_ = new AudioView(lowerPane);
+    lowerLay->addWidget(view_, 1);
+    mainSplit->addWidget(lowerPane);
+    mainSplit->setSizes({520, 340});
+    mainSplit->setCollapsible(0, false);
+    mainSplit->setStretchFactor(1, 1);
     view_->setMode(Settings::instance().playerMode());
 
     connect(view_, &AudioView::selectionChanged, this, [this](qint64, qint64) { /* info only */ });

@@ -3,6 +3,7 @@
 #include <QAudioSink>
 #include <QAudioFormat>
 #include <QMediaDevices>
+#include <QDebug>
 #include <cstring>
 #include <algorithm>
 
@@ -33,17 +34,33 @@ void AudioPlayer::setBuffer(const float *data, qint64 totalFrames, int channels,
 
 void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     if (!buf_ || totalFrames_ == 0) return;
-    if (endFrame <= startFrame) endFrame = totalFrames_;
+    startFrame = std::clamp(startFrame, qint64(0), totalFrames_ - 1);
+    if (endFrame <= startFrame || endFrame > totalFrames_) endFrame = totalFrames_;
 
     QAudioFormat fmt;
     fmt.setSampleRate(sampleRate_);
     fmt.setChannelCount(channels_);
     fmt.setSampleFormat(QAudioFormat::Float);
 
+    // Verify the format is supported by the default audio device.
+    const QAudioDevice dev = QMediaDevices::defaultAudioOutput();
+    if (!dev.isFormatSupported(fmt)) {
+        qWarning() << "AudioPlayer: format" << sampleRate_ << "Hz /"
+                   << channels_ << "ch float not supported by output device";
+        return;
+    }
+
     delete sink_;
-    sink_ = new QAudioSink(fmt);
-    if (!device_) device_ = new FloatPcmDevice(this);
-    device_->open(QIODevice::ReadOnly);
+    sink_ = new QAudioSink(dev, fmt, this);
+
+    // Recreate the pull device for every play session (a fresh QIODevice
+    // must be opened before being handed to QAudioSink::start()).
+    delete device_;
+    device_ = new FloatPcmDevice(this);
+    if (!device_->open(QIODevice::ReadOnly)) {
+        qWarning() << "AudioPlayer: cannot open PCM pull device";
+        return;
+    }
 
     startFrames_ = startFrame;
     posFrames_ = startFrame;
@@ -52,13 +69,16 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     looping_ = loop;
     playing_ = true;
 
-    sink_->start(device_);
     connect(sink_, &QAudioSink::stateChanged, this, [this](QAudio::State st) {
-        if (st == QAudio::StoppedState && playing_) {
+        if ((st == QAudio::StoppedState || st == QAudio::IdleState) && playing_) {
+            if (sink_ && sink_->error() != QAudio::NoError) {
+                qWarning() << "AudioPlayer: sink error" << sink_->error();
+            }
             playing_ = false;
             emit finished();
         }
     });
+    sink_->start(device_);
 }
 
 qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
