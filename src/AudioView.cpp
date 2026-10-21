@@ -249,8 +249,9 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         drag_ = NewSelection;
         dragStartX_ = x;
         qint64 f = xToFrame(x);
-        // click without drag places cursor and clears selection (resolved on release)
-        selStart_ = f; selEnd_ = f;
+        // Do not create the selection here: a plain click (press + release
+        // without dragging) must only move the cursor and clear the
+        // selection. The actual selection is finalized in mouseReleaseEvent.
         cursorFrame_ = f;
         emit cursorMoved(f);
         update();
@@ -262,6 +263,15 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
 
 void AudioView::mouseMoveEvent(QMouseEvent *e) {
     if (!audio_) return;
+    // Only react to movement while a mouse button is held down.
+    // With setMouseTracking(true) Qt also delivers hover moves with
+    // buttons() == NoButton — those must not create or change a selection.
+    if (!(e->buttons() & (Qt::LeftButton | Qt::MiddleButton | Qt::RightButton)))
+        return;
+    // If no drag was started on press (e.g. button pressed outside the view),
+    // ignore plain moves as well.
+    if (drag_ == NoDrag)
+        return;
     int x = e->position().x();
     switch (drag_) {
     case NewSelection: {
@@ -299,6 +309,25 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
     }
     default: break;
     }
+}
+
+void AudioView::mouseReleaseEvent(QMouseEvent *e) {
+    if (!audio_) { drag_ = NoDrag; return; }
+    int x = e->position().x();
+    if (drag_ == NewSelection && e->button() == Qt::LeftButton) {
+        qint64 a = xToFrame(dragStartX_), b = xToFrame(x);
+        if (std::abs(b - a) <= 1) {
+            // Plain click without dragging: clear selection, keep cursor.
+            clearSelection();
+        } else {
+            setSelectionRange(a, b);
+        }
+    } else if ((drag_ == MoveSelStart || drag_ == MoveSelEnd || drag_ == MoveMarker)
+               && e->button() == Qt::LeftButton) {
+        emit selectionChanged(selStart_, selEnd_);
+    }
+    drag_ = NoDrag;
+    update();
 }
 
 void AudioView::mouseDoubleClickEvent(QMouseEvent *e) {
