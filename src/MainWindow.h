@@ -20,6 +20,13 @@
 
 class PreviewWorker;
 
+// Result of a background directory scan (used with queued signal delivery).
+struct DirScanResult {
+    QString dir;
+    QVector<FileTableModel::Row> rows;
+};
+Q_DECLARE_METATYPE(DirScanResult)
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -62,8 +69,6 @@ private:
                           const QVector<UndoRecord::MarkerDelta> &deltas = {});
     void rebuildColumnMenu();
     int currentRow() const;      // sorted/view row -> source row mapping handled internally
-
-    struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
 
     // UI
     QFileSystemModel *fsModel_ = nullptr;

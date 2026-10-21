@@ -28,27 +28,27 @@ QString UndoStack::writeOriginalSamples(const QString &undoDir, const AudioData 
                                         qint64 startFrame, qint64 endFrame, QString *err) {
     QDir().mkpath(undoDir);
     QString file = undoDir + QStringLiteral("/undo_%1.raw")
-                       .arg(QString::fromUtf8(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+                       .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     QFile f(file);
     if (!f.open(QIODevice::WriteOnly)) {
         if (err) *err = QStringLiteral("Cannot write undo data to %1").arg(undoDir);
         return QString();
     }
-    const float *p = data.samples.constData() + startFrame * data.channels;
+    const float *p = data.samples.data() + size_t(startFrame) * data.channels;
     qint64 frames = endFrame - startFrame;
     f.write(reinterpret_cast<const char *>(p), frames * data.channels * sizeof(float));
     f.close();
     return file;
 }
 
-bool UndoStack::readOriginalSamples(const QString &file, QVector<float> &out, QString *err) {
+bool UndoStack::readOriginalSamples(const QString &file, std::vector<float> &out, QString *err) {
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) {
         if (err) *err = QStringLiteral("Undo data missing: %1").arg(file);
         return false;
     }
     QByteArray raw = f.readAll();
-    out.resize(raw.size() / int(sizeof(float)));
+    out.resize(size_t(raw.size() / int(sizeof(float))));
     std::memcpy(out.data(), raw.constData(), raw.size());
     return true;
 }

@@ -28,7 +28,7 @@ static SampleFormat sfToFormat(int format) {
 
 bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
     SF_INFO info{};
-    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_READ, &info);
+    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SFM_READ, &info);
     if (sf) {
         meta.sampleRate = info.samplerate;
         meta.channels = info.channels;
@@ -36,7 +36,7 @@ bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
         meta.format = sfToFormat(info.format);
         meta.valid = info.frames > 0 && info.channels > 0;
         // WAV comment via libsndfile strings (ICMT chunk).
-        const char *cmt = sf_get_string(sf, SF_STR_COMMENTS);
+        const char *cmt = sf_get_string(sf, SF_STR_COMMENT);
         if (cmt) meta.comment = QString::fromUtf8(cmt);
         sf_close(sf);
         if (meta.valid) return true;
@@ -50,13 +50,13 @@ bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
         meta.totalFrames = qint64(ap->length()) * ap->sampleRate();
         meta.format = SampleFormat::Unknown;
         meta.valid = true;
-        PropertyMap props = f.file()->properties();
-        if (props.contains(QLatin1String("COMMENT")))
-            meta.comment = props[QLatin1String("COMMENT")][0];
-        else if (props.contains(QLatin1String("DESCRIPTION")))
-            meta.comment = props[QLatin1String("DESCRIPTION")][0];
+        TagLib::PropertyMap props = f.file()->properties();
+        if (props.contains(TagLib::String("COMMENT")))
+            meta.comment = QString::fromUtf8(props[TagLib::String("COMMENT")][0].toCString(true));
+        else if (props.contains(TagLib::String("DESCRIPTION")))
+            meta.comment = QString::fromUtf8(props[TagLib::String("DESCRIPTION")][0].toCString(true));
         else if (f.tag() && !f.tag()->comment().isEmpty())
-            meta.comment = QString::fromStdWString(f.tag()->comment().data());
+            meta.comment = QString::fromUtf8(f.tag()->comment().toCString(true));
         return true;
     }
     if (err) *err = QStringLiteral("Unsupported or corrupted file");
@@ -94,13 +94,13 @@ bool AudioFile::decodeWithFfmpeg(const QString &path, QString &tempOut, QString 
 
 static bool loadViaSndfile(const QString &path, AudioData &out, QString *err) {
     SF_INFO info{};
-    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_READ, &info);
+    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SFM_READ, &info);
     if (!sf) { if (err) *err = QString::fromUtf8(sf_strerror(nullptr)); return false; }
     out.sampleRate = info.samplerate;
     out.channels = info.channels;
     out.totalFrames = info.frames;
     out.format = sfToFormat(info.format);
-    const char *cmt = sf_get_string(sf, SF_STR_COMMENTS);
+    const char *cmt = sf_get_string(sf, SF_STR_COMMENT);
     if (cmt) out.comment = QString::fromUtf8(cmt);
     out.samples.resize(out.totalFrames * out.channels);
     sf_count_t got = sf_readf_float(sf, out.samples.data(), out.totalFrames);
@@ -141,11 +141,11 @@ bool AudioFile::save(const QString &path, const AudioData &data, QString *err) {
     info.samplerate = data.sampleRate;
     info.channels = data.channels;
     info.format = format;
-    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_WRITE, &info);
+    SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SFM_WRITE, &info);
     if (!sf) { if (err) *err = QString::fromUtf8(sf_strerror(nullptr)); return false; }
-    sf_count_t wrote = sf_writef_float(sf, data.samples.constData(), data.totalFrames);
+    sf_count_t wrote = sf_writef_float(sf, data.samples.data(), data.totalFrames);
     if (!data.comment.isEmpty())
-        sf_set_string(sf, SF_STR_COMMENTS, data.comment.toUtf8().constData());
+        sf_set_string(sf, SF_STR_COMMENT, data.comment.toUtf8().constData());
     sf_close(sf);
     if (wrote != data.totalFrames) {
         if (err) *err = QStringLiteral("Incomplete write");

@@ -8,15 +8,19 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QInputDialog>
+#include <QSplitter>
+#include <QStatusBar>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QThreadPool>
+#include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
 
@@ -148,7 +152,7 @@ void MainWindow::buildUi() {
     });
     connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged,
             this, &MainWindow::onRowClicked);
-    connect(model_, &FileDialogModel::previewRequested, this, &MainWindow::requestPreview);
+    connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
 
     // ---- action panel (active file) ----
     auto *actionsBar = new QWidget(central);
@@ -366,7 +370,7 @@ void MainWindow::onDirSelected(const QString &path) {
     // Background scan (spec 3.1/12): never block UI.
     DirScanResult res{dir, {}};
     auto future = QtConcurrent::run([dir]() {
-        QVector<FileDialogModel::Row> rows;
+        QVector<FileTableModel::Row> rows;
         QDir d(dir);
         const auto entries = d.entryInfoList(QDir::Files, QDir::Name);
         for (const QFileInfo &fi : entries) {
@@ -395,7 +399,7 @@ void MainWindow::onDirSelected(const QString &path) {
         return rows;
     });
     // poll-free completion via watcher
-    auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+    auto *watcher = new QFutureWatcher<QVector<FileTableModel::Row>>(this);
     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, dir]() {
         DirScanResult res2{dir, watcher->result()};
         watcher->deleteLater();
@@ -410,7 +414,7 @@ void MainWindow::onScanFinished(DirScanResult res) {
     model_->setRows(res.rows);
     model_->sort(FileTableModel::ColName, Qt::AscendingOrder);
     // lazy prefetch of first N previews (spec 2.4)
-    int n = std::min(Settings::instance().previewPrefetchCount(), res.rows.size());
+    int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(res.rows.size()));
     const QString mode = Settings::instance().tablePreviewMode();
     for (int i = 0; i < n; ++i)
         if (!res.rows[i].broken)
@@ -430,7 +434,7 @@ void MainWindow::refreshPreviewsForDir() {
     auto mutableRows = model_->rows();
     for (auto &r : mutableRows) { r.previewLoaded = false; r.preview = QImage(); }
     model_->setRows(mutableRows);
-    int n = std::min(Settings::instance().previewPrefetchCount(), mutableRows.size());
+    int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(mutableRows.size()));
     for (int i = 0; i < n; ++i)
         if (!mutableRows[i].broken) requestPreview(i);
 }
@@ -481,7 +485,7 @@ void MainWindow::loadCurrentFile() {
     }
     currentPath_ = r.path;
     markers_ = Database::instance().loadMarkers(r.path);
-    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames,
+    player_.setBuffer(audio_.samples.data(), audio_.totalFrames,
                       audio_.channels, audio_.sampleRate);
     view_->setData(&audio_);
     view_->setMarkers(&markers_);
@@ -664,7 +668,8 @@ void MainWindow::doDeleteSelection() {
 
     applyEditToRange([&] {
         // shift remaining samples left
-        audio_.samples.remove(off * ch, len * ch);
+        audio_.samples.erase(std::next(audio_.samples.begin(), off * ch),
+                             std::next(audio_.samples.begin(), (off + len) * ch));
         audio_.totalFrames -= len;
         // apply marker changes
         for (int i = 0; i < markers_.size(); ++i) {
@@ -694,11 +699,12 @@ void MainWindow::undo() {
     const int ch = audio_.channels;
     if (rec->type == QLatin1String("delete")) {
         // re-insert removed samples
-        QVector<float> orig;
+        std::vector<float> orig;
         if (!UndoStack::readOriginalSamples(rec->samplesFile, orig, &err)) {
             QMessageBox::warning(this, tr("Undo"), err); return;
         }
-        audio_.samples.insert(rec->offset * ch, orig.constData(), orig.size());
+        audio_.samples.insert(std::next(audio_.samples.begin(), rec->offset * ch),
+                              orig.begin(), orig.end());
         audio_.totalFrames += rec->length;
         // restore markers: undeleted ones return at old positions, deleted are revived
         markers_.clear();
@@ -709,14 +715,14 @@ void MainWindow::undo() {
             markers_.push_back(m);   // spec 4.6: undo restores markers at original positions
         }
     } else {
-        QVector<float> orig;
+        std::vector<float> orig;
         if (!UndoStack::readOriginalSamples(rec->samplesFile, orig, &err)) {
             QMessageBox::warning(this, tr("Undo"), err); return;
         }
-        std::copy(orig.constData(), orig.constData() + orig.size(),
-                  audio_.samples.begin() + rec->offset * ch);
+        std::copy(orig.begin(), orig.end(),
+                  std::next(audio_.samples.begin(), rec->offset * ch));
     }
-    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
+    player_.setBuffer(audio_.samples.data(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
     if (!AudioFile::save(currentPath_, audio_, &err))
         QMessageBox::warning(this, tr("Save failed"), err);
     persistMarkers();
@@ -748,7 +754,8 @@ void MainWindow::redo() {
                 audio_.samples[i] *= gain;
         }
     } else if (rec->type == QLatin1String("delete")) {
-        audio_.samples.remove(rec->offset * ch, rec->length * ch);
+        audio_.samples.erase(std::next(audio_.samples.begin(), rec->offset * ch),
+                             std::next(audio_.samples.begin(), (rec->offset + rec->length) * ch));
         audio_.totalFrames -= rec->length;
         markers_.clear();
         for (const auto &d : rec->markerDeltas) {
@@ -759,7 +766,7 @@ void MainWindow::redo() {
             markers_.push_back(m);
         }
     }
-    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
+    player_.setBuffer(audio_.samples.data(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
     if (!AudioFile::save(currentPath_, audio_, &err))
         QMessageBox::warning(this, tr("Save failed"), err);
     persistMarkers();

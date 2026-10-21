@@ -1,5 +1,6 @@
 #pragma once
 #include <QVector>
+#include <QDateTime>
 #include <QString>
 #include "AudioFile.h"
 #include "Types.h"
@@ -35,7 +36,7 @@ public:
 
     static QString writeOriginalSamples(const QString &undoDir, const AudioData &data,
                                         qint64 startFrame, qint64 endFrame, QString *err);
-    static bool readOriginalSamples(const QString &file, QVector<float> &out, QString *err);
+    static bool readOriginalSamples(const QString &file, std::vector<float> &out, QString *err);
 
     void clear();
     // Enforce depth and disk limits; oldest records dropped first.

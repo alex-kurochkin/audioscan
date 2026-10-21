@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include <QPainter>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 // ---- Minimal iterative radix-2 FFT ----
@@ -67,7 +68,7 @@ QImage Renderer::waveform(const AudioData &audio, int width, int height, bool) {
         int lo = mid + int(mn * (height / 2 - 1));
         int hi = mid + int(mx * (height / 2 - 1));
         if (hi > lo) std::swap(hi, lo);
-        for (int y = hi; y <= lo; ++y) p.setPixel(x, y, wave.rgb());
+        for (int y = hi; y <= lo; ++y) img.setPixel(x, y, wave.rgb());
         if (prevLo >= 0 && lo == hi) { // fill gaps between columns
             p.setPen(wave);
             p.drawLine(x - 1, std::clamp(prevMid, 0, height - 1), x, mid);

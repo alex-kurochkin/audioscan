@@ -1,5 +1,6 @@
 #pragma once
 #include <QAbstractTableModel>
+#include <QDateTime>
 #include <QImage>
 #include <QPersistentModelIndex>
 
@@ -32,6 +33,7 @@ public:
     void setRows(const QVector<Row> &rows);
     const QVector<Row> &rows() const { return rows_; }
     void setPreview(int row, const QImage &img);
+    QImage previewAt(int row) const;
     void updateVisibleColumns(const QVector<int> &orderedVisibleCols);
 
     int rowCount(const QModelIndex &parent = {}) const override;

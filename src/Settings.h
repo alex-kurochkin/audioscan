@@ -1,12 +1,12 @@
 #pragma once
 #include <QObject>
-#include <QSettings>
 #include <QString>
 #include <QStringList>
 #include <QKeySequence>
 #include <QVariantMap>
+#include <QJsonObject>
 
-// Static settings stored in ~/.config/<app>/config.json via QSettings JsonFormat.
+// Static settings stored in ~/.config/<app>/config.json (plain JSON key/value).
 class Settings : public QObject {
     Q_OBJECT
 public:
@@ -52,5 +52,11 @@ signals:
 
 private:
     Settings();
-    QSettings s_;
+    QVariant value(const QString &key, const QVariant &fallback = {}) const;
+    void setValue(const QString &key, const QVariant &v);
+    void removeKey(const QString &key);
+    QJsonObject data_;
+    QString filePath_;
+    void load();
+    void save();
 };

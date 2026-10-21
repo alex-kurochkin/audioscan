@@ -8,7 +8,7 @@ static const char *kColumnKeys[] = {
     "name","preview","duration","samplerate","sampletype",
     "channels","size","comment","created","modified"};
 
-FileDialogModel::FileDialogModel(QObject *parent) : QAbstractTableModel(parent) {
+FileTableModel::FileTableModel(QObject *parent) : QAbstractTableModel(parent) {
     for (int i = 0; i < ColCount; ++i) visibleCols_ << i;
 }
 
@@ -38,6 +38,11 @@ void FileTableModel::setPreview(int row, const QImage &img) {
     if (visCol >= 0)
         emit dataChanged(index(row, visCol), index(row, visCol));
 }
+
+QImage FileTableModel::previewAt(int row) const {
+    return (row >= 0 && row < rows_.size()) ? rows_[row].preview : QImage();
+}
+
 
 void FileTableModel::updateVisibleColumns(const QVector<int> &orderedVisibleCols) {
     beginResetModel();
@@ -78,7 +83,7 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const {
     case ColPreview:
         if (role == Qt::DecorationRole) return r.preview;
         if (role == Qt::DisplayRole && !r.previewLoaded)
-            emit previewRequested(index.row());
+            Q_EMIT const_cast<FileTableModel *>(this)->previewRequested(index.row());
         return {};
     case ColDuration: {
         double sec = r.sampleRate ? double(r.frames) / r.sampleRate : 0.0;

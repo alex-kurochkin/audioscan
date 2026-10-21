@@ -29,7 +29,7 @@ public:
 signals:
     void done(const QString &path, const QString &imagePath);
 
-private slots:
+public slots:
     void loop() {
         while (true) {
             Job job;

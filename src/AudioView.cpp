@@ -281,10 +281,10 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
     case MoveMarker: {
         if (markers_ && dragMarkerIdx_ >= 0 && dragMarkerIdx_ < markers_->size()) {
             qint64 f = xToFrame(x);
-            const_cast<QVector<Marker> *>(markers_)->[dragMarkerIdx_].timeSamples = f;
+            Marker &m = const_cast<QVector<Marker> *>(markers_)->operator[](dragMarkerIdx_);
+            m.timeSamples = f;
             if (audio_->sampleRate)
-                const_cast<QVector<Marker> *>(markers_)->[dragMarkerIdx_].timeSec =
-                    double(f) / audio_->sampleRate;
+                m.timeSec = double(f) / audio_->sampleRate;
             emit markerMoved(dragMarkerIdx_, f);
             update();
         }

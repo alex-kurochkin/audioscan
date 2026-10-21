@@ -9,7 +9,7 @@ struct AudioData {
     int channels = 2;
     SampleFormat format = SampleFormat::Float32;
     qint64 totalFrames = 0;
-    QVector<float> samples;      // interleaved
+    std::vector<float> samples;      // interleaved
     QString comment;             // ICMT / Vorbis comment / TagLib comment
     bool valid = false;
 
