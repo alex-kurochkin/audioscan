@@ -47,7 +47,8 @@ bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
         auto *ap = f.audioProperties();
         meta.sampleRate = ap->sampleRate();
         meta.channels = ap->channels();
-        meta.totalFrames = qint64(ap->length()) * ap->sampleRate();
+        // Use milliseconds to avoid the deprecated length() and keep sub-second precision.
+        meta.totalFrames = qint64(ap->lengthInMilliseconds()) * ap->sampleRate() / 1000;
         meta.format = SampleFormat::Unknown;
         meta.valid = true;
         TagLib::PropertyMap props = f.file()->properties();
