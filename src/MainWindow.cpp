@@ -38,15 +38,17 @@
 #include <cmath>
 
 // ---------------- debug logging (playback troubleshooting) ----------------
-// Writes to ./audioscout_debug.log in the current working directory so the
-// user can attach it when audio playback fails.
+// Writes to ~/.config/AudioScout/audioscout_debug.log so the log is found
+// regardless of the directory the app was launched from.
 static QFile     g_dbgFile;
 static QTextStream g_dbg(&g_dbgFile);
 static bool      g_dbgOn = false;
 
 static void dbgOpenIfNeeded() {
     if (g_dbgOn) return;
-    g_dbgFile.setFileName(QDir::current().filePath(QStringLiteral("audioscout_debug.log")));
+    const QDir cfgDir(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
+    if (!cfgDir.exists()) cfgDir.mkpath(QStringLiteral("."));
+    g_dbgFile.setFileName(cfgDir.filePath(QStringLiteral("audioscout_debug.log")));
     if (g_dbgFile.open(QIODevice::Append | QIODevice::Text)) {
         g_dbg.setDevice(&g_dbgFile);
         g_dbgOn = true;
@@ -144,7 +146,8 @@ static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
 
 static QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
     QStringList args;
-    args << "-nodisp" << "-autoexit" << "-loglevel" << "quiet"
+    // NOTE: ffplay has no -autoexit option; it exits on EOF of stdin input.
+    args << "-nodisp" << "-loglevel" << "quiet"
          << "-f" << "f32le"
          << "-ar" << QString::number(fmt.sampleRate())
          << "-ac" << QString::number(fmt.channelCount())
@@ -820,15 +823,27 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
                 }
                 if (playBtn_) playBtn_->setText(tr("Play"));
             });
+    // ffmpeg writes directly to the ALSA "default" device, which resolves to
+    // whatever output is configured in the system sound settings — no need to
+    // enumerate /proc/asound/cards or pick a card name manually.
     QStringList args;
-    args << "-hide_banner" << "-loglevel" << "error" << "-re";
+    args << "-hide_banner" << "-nostdin" << "-loglevel" << "warning" << "-re";
     if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
     args << "-t" << QString::number(durSec, 'f', 3);
-    args << "-i" << playTmpPath_ << "-vn" << "-autoexit";
+    args << "-i" << playTmpPath_ << "-vn" << "-acodec" << "pcm_s16le"
+         << "-f" << "alsa" << "default";
     DBG(QStringLiteral("spawning: %1 %2").arg(ff, args.join(' ')));
     playProc_->setProgram(ff);
     playProc_->setArguments(args);
-    playProc_->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    // Capture ffmpeg stderr so ALSA errors end up in the debug log too.
+    playProc_->setProcessChannelMode(QProcess::SeparateChannels);
+    connect(playProc_, &QProcess::readyReadStandardError, this, [this] {
+        const QString s = QString::fromUtf8(playProc_->readAllStandardError()).trimmed();
+        if (!s.isEmpty()) {
+            DBG(QStringLiteral("ffmpeg stderr: %1").arg(s));
+            qWarning().noquote() << "[audioscout][ffmpeg]" << s;
+        }
+    });
     wasPlaying_ = true;
     fbElapsedMs_ = 0;
     fbClock_.start();
