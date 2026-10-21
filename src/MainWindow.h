@@ -106,6 +106,8 @@ private:
     bool wasPlaying_ = false;           // fallback session active (vs. stopped/paused)
     qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
     QElapsedTimer fbClock_;             // timing for fbElapsedMs_
+    qint64 fbFromFrame_ = 0;            // frame playback started from (this proc)
+    QTimer *fbPlayheadTimer_ = nullptr; // advances the playhead during fallback
     void startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop);
     void stopFfmpegFallback();
     void resumeFfmpegFallback();

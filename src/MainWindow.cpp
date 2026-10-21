@@ -814,6 +814,7 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
     connect(playProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus status) {
                 if (playProc_) { playProc_->deleteLater(); playProc_ = nullptr; }
+                if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
                 QFile::remove(playTmpPath_);
                 playTmpPath_.clear();
                 if (!wasPlaying_) return;      // stopped/paused intentionally
@@ -856,10 +857,34 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
     });
     wasPlaying_ = true;
     fbElapsedMs_ = 0;
+    fbFromFrame_ = fromFrame;
     fbClock_.start();
+
+    // Advance the playhead in sync with real time while ffmpeg plays: the
+    // external process gives us no position feedback, so we track wall clock.
+    if (!fbPlayheadTimer_) {
+        fbPlayheadTimer_ = new QTimer(this);
+        fbPlayheadTimer_->setInterval(50);
+        connect(fbPlayheadTimer_, &QTimer::timeout, this, [this] {
+            if (!playProc_ || !wasPlaying_ || audio_.sampleRate <= 0) return;
+            const double sr = audio_.sampleRate;
+            qint64 elapsed = fbElapsedMs_ + (fbClock_.isValid() ? fbClock_.elapsed() : 0);
+            qint64 f = fbFromFrame_ + qint64(elapsed * sr / 1000.0);
+            if (f >= fbEndFrame_) {
+                // Process is about to finish on its own; clamp at range end.
+                view_->setPlayheadFrame(fbEndFrame_);
+                fbPlayheadTimer_->stop();
+                return;
+            }
+            view_->setPlayheadFrame(f);
+        });
+    }
+    fbPlayheadTimer_->start();
+
     playProc_->start();
     if (!playProc_->waitForStarted(3000)) {
         DBG("failed to start ffmpeg playback process (waitForStarted timed out)");
+        if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
         playProc_->disconnect(this);
         playProc_->deleteLater();
         playProc_ = nullptr;
@@ -877,6 +902,7 @@ void MainWindow::resumeFfmpegFallback() {
 
 void MainWindow::stopFfmpegFallback() {
     wasPlaying_ = false;
+    if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
     if (!playProc_) return;
     fbElapsedMs_ += fbClock_.isValid() ? fbClock_.elapsed() : 0;
     // Remember roughly where playback stopped so the next Play resumes there.
