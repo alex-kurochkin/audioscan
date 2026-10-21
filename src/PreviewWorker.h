@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QImage>
 #include <QString>
+class QThread;
 
 // Background preview generator: decodes audio (libsndfile/ffmpeg), renders
 // 340x20 wave/spectrogram, stores PNG in the preview cache dir under a UUIDv4
@@ -10,6 +11,7 @@ class PreviewWorker : public QObject {
     Q_OBJECT
 public:
     explicit PreviewWorker(QObject *parent = nullptr);
+    ~PreviewWorker() override;
     void request(const QString &path, const QString &mode);
     bool hasPending(const QString &path) const;
 
@@ -19,4 +21,5 @@ signals:
 private:
     class Runner;
     Runner *runner_;
+    QThread *thread_ = nullptr;   // owned; stopped gracefully in the destructor
 };

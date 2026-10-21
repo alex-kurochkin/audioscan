@@ -97,7 +97,10 @@ void AudioView::applyZoom(double factor, int mouseX) {
     double ratio = double(centerFrame - (viewLen_ > 0 ? viewStart_ : 0)) / std::max<qint64>(1, curLen);
     viewLen_ = (newLen >= total) ? 0 : newLen;
     if (viewLen_ > 0) {
-        viewStart_ = std::clamp<qint64>(centerFrame - qint64(ratio * newLen), 0, total - newLen);
+        // max() guards against a negative upper bound when the file is shorter
+        // than the minimum zoom window (std::clamp aborts if hi < lo).
+        viewStart_ = std::clamp<qint64>(centerFrame - qint64(ratio * newLen), 0,
+                                        std::max<qint64>(0, total - newLen));
     } else {
         viewStart_ = 0;
     }
@@ -143,19 +146,27 @@ void AudioView::rebuildBaseImage() {
         }
         return;
     }
+    if (viewLen_ > 0 && audio_->totalFrames > 0) {
+        // Zoomed in: render ONLY the visible frame range at full widget
+        // resolution. (Rendering the whole file and cropping a few pixels of
+        // it produced a blurry, meaningless strip at high zoom levels.)
+        const qint64 savedStart = viewStart_, savedLen = viewLen_;
+        // The renderers below take an AudioData and ignore the view state, so
+        // we can simply hand them a copy trimmed to the visible window.
+        const qint64 endFrame = std::min(savedStart + savedLen, audio_->totalFrames);
+        AudioData sub = *audio_;
+        sub.samples.assign(audio_->samples.begin() + savedStart * audio_->channels,
+                           audio_->samples.begin() + endFrame * audio_->channels);
+        sub.totalFrames = endFrame - savedStart;
+        base_ = (mode_ == QLatin1String("spectrogram"))
+                    ? Renderer::spectrogram(sub, w, h)
+                    : Renderer::waveform(sub, w, h);
+        return;
+    }
     if (mode_ == QLatin1String("spectrogram"))
         base_ = Renderer::spectrogram(*audio_, w, h);
     else
         base_ = Renderer::waveform(*audio_, w, h);
-
-    if (viewLen_ > 0 && audio_->totalFrames > 0) {
-        // crop the full-file image to the visible range
-        double scale = double(base_.width()) / audio_->totalFrames;
-        int sx = int(viewStart_ * scale);
-        int sw = std::max(1, int(viewLen_ * scale));
-        sw = std::min(sw, base_.width() - sx);
-        base_ = base_.copy(sx, 0, sw, base_.height());
-    }
 }
 
 void AudioView::paintEvent(QPaintEvent *) {

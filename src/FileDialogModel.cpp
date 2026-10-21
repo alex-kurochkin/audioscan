@@ -134,7 +134,8 @@ Qt::ItemFlags FileTableModel::flags(const QModelIndex &index) const {
     return f;
 }
 
-void FileTableModel::sort(int column, Qt::SortOrder order) {
+void FileTableModel::sortByModelColumn(int modelCol, Qt::SortOrder order) {
+    const int column = modelCol;
     if (column == ColPreview || column == ColComment) return;   // forbidden per spec
     sortCol_ = column; sortOrder_ = order;
     std::stable_sort(rows_.begin(), rows_.end(), [&](const Row &a, const Row &b) {

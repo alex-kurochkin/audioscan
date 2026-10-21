@@ -43,12 +43,16 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QVariant headerData(int section, Qt::Orientation o, int role) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;
-    // Sorting on Preview and Comment columns is disabled (spec 2.4).
-    void sort(int column, Qt::SortOrder order) override;
 
     QString columnName(int col) const;
     static QString columnKey(int col);
     static int columnFromKey(const QString &key);
+
+    // Sort by a *model* column id (not the visual/logical header section).
+    // Sorting on Preview and Comment is disabled (spec 2.4).
+    void sortByModelColumn(int modelCol, Qt::SortOrder order);
+    int sortColumn() const { return sortCol_; }
+    Qt::SortOrder sortOrder() const { return sortOrder_; }
 
 signals:
     void previewRequested(int row);   // lazy loading request

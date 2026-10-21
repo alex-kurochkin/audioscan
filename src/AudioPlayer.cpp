@@ -161,7 +161,11 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
     const int bytesPerFrame = channels_ * int(sizeof(float));
 
     // Push-mode fallback: produce PCM in the external sink's native format.
-    if (!sink_ || outDevice_) {
+    // NOTE: must consult outDevice_ (the fallback flag) — sink_ may be a
+    // non-null leftover from an earlier Qt-sink session or from the Int16
+    // probe path, which would otherwise hijack this branch and write float
+    // bytes into an S16 stream (distorted playback).
+    if (outDevice_) {
         const bool i16 = outFmt_.sampleFormat() == QAudioFormat::Int16;
         const bool u8 = outFmt_.sampleFormat() == QAudioFormat::UInt8;
         const qint64 fbBytesPerFrame = channels_ * (i16 ? qint64(2) : u8 ? qint64(1) : qint64(4));
@@ -223,7 +227,6 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
         }
     } else {
         float *dst = reinterpret_cast<float *>(out);
-        std::memcpy(dst, src, size_t(wantFrames * bytesPerFrame));
         for (qint64 i = 0; i < wantFrames * channels_; ++i)
             dst[i] = float(src[i] * v);
     }

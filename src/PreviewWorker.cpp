@@ -16,8 +16,20 @@
 class PreviewWorker::Runner : public QObject {
     Q_OBJECT
 public:
+    // Graceful shutdown: wakes the waiting loop so it can exit its thread
+    // instead of being terminated mid-database-write at app exit.
+    ~Runner() override {
+        {
+            QMutexLocker l(&mtx);
+            quit_ = true;
+        }
+        cond.wakeAll();
+        if (thread_) thread_->wait(3000);
+    }
+    void setThread(QThread *t) { thread_ = t; }
     void enqueue(const QString &path, const QString &mode) {
         QMutexLocker l(&mtx);
+        if (quit_) return;
         queue.enqueue({path, mode});
         cond.wakeAll();
     }
@@ -35,7 +47,8 @@ public slots:
             Job job;
             {
                 QMutexLocker l(&mtx);
-                while (queue.isEmpty()) cond.wait(&mtx);
+                while (queue.isEmpty() && !quit_) cond.wait(&mtx);
+                if (quit_) return;          // drain-exit: never terminate mid-render
                 job = queue.dequeue();
                 processing_ = job.path;
             }
@@ -52,6 +65,8 @@ private:
     QMutex mtx;
     QWaitCondition cond;
     QString processing_;
+    bool quit_ = false;
+    QThread *thread_ = nullptr;
 
     QString render(const Job &job) {
         auto &S = Settings::instance();
@@ -88,13 +103,29 @@ private:
 
 PreviewWorker::PreviewWorker(QObject *parent) : QObject(parent) {
     runner_ = new Runner;
-    static QThread thread;
-    runner_->moveToThread(&thread);
-    connect(&thread, &QThread::started, runner_, &Runner::loop);
+    thread_ = new QThread(this);
+    thread_->setObjectName(QStringLiteral("PreviewWorker"));
+    runner_->moveToThread(thread_);
+    runner_->setThread(thread_);
+    connect(thread_, &QThread::started, runner_, &Runner::loop);
     connect(runner_, &Runner::done, this, [this](const QString &p, const QString &i) {
         emit ready(p, i);
     });
-    thread.start();
+    thread_->start();
+}
+
+PreviewWorker::~PreviewWorker() {
+    // Ask the loop to exit and stop the thread cleanly: quitting here used to
+    // leave a running thread that Qt terminated at app exit — sometimes in the
+    // middle of a SQLite write, corrupting the preview cache.
+    if (thread_ && thread_->isRunning()) {
+        thread_->requestInterruption();
+        thread_->quit();
+        if (!thread_->wait(3000))
+            thread_->terminate();
+    }
+    delete runner_;   // Runner dtor also signals quit_ and waits for the thread
+    runner_ = nullptr;
 }
 
 void PreviewWorker::request(const QString &path, const QString &mode) {

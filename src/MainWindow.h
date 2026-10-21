@@ -65,6 +65,8 @@ private slots:
 private:
     void buildUi();
     void applyTableColumnWidths();   // per-model-column widths after reset/move
+    void sortByModelColumn(int modelCol, Qt::SortOrder order);  // sort + indicator/selection sync
+    void updateSortIndicator();      // keep the header arrow on the right visual section
     void requestPreview(int row);
     bool editGuarded();          // checks editable format + write perms
     void persistMarkers();

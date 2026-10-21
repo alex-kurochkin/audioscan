@@ -225,9 +225,11 @@ bool AudioFile::save(const QString &path, const AudioData &data, QString *err) {
     info.format = format;
     SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SFM_WRITE, &info);
     if (!sf) { if (err) *err = QString::fromUtf8(sf_strerror(nullptr)); return false; }
-    sf_count_t wrote = sf_writef_float(sf, data.samples.data(), data.totalFrames);
+    // Header strings must be set BEFORE writing samples: after the PCM data is
+    // committed, libsndfile can no longer insert the ICMT/text chunk.
     if (!data.comment.isEmpty())
         sf_set_string(sf, SF_STR_COMMENT, data.comment.toUtf8().constData());
+    sf_count_t wrote = sf_writef_float(sf, data.samples.data(), data.totalFrames);
     sf_close(sf);
     if (wrote != data.totalFrames) {
         if (err) *err = QStringLiteral("Incomplete write");

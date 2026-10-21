@@ -294,7 +294,10 @@ void MainWindow::buildUi() {
     model_ = new FileTableModel(rightPanel);
     table_ = new QTableView(rightPanel);
     table_->setModel(model_);
-    table_->setSortingEnabled(true);
+    // Sorting is applied manually via the header-click handler below (the
+    // model has no stable sort proxy — setSortingEnabled(true) would make
+    // Qt re-sort with a visual/logical column index and corrupt the order).
+    table_->setSortingEnabled(false);
     table_->horizontalHeader()->setSortIndicatorShown(true);
     table_->horizontalHeader()->setSectionsMovable(true);   // drag to reorder (spec 2.4)
     table_->horizontalHeader()->setSectionsClickable(true);
@@ -324,10 +327,34 @@ void MainWindow::buildUi() {
     // into the player (spec: file load via double click).
     connect(table_, &QTableView::doubleClicked,
             this, &MainWindow::onRowDoubleClicked);
+
+    // Sorting is handled manually by the model (FileTableModel): QTableView's
+    // built-in sort-on-click would hand us a *visual/logical* header section,
+    // which mismatches the model column ids once columns are reordered or
+    // hidden. Track header clicks ourselves and translate them to model cols.
+    table_->setSortingEnabled(false);
+    table_->horizontalHeader()->setSortIndicatorShown(true);
+    connect(table_->horizontalHeader(), &QHeaderView::sectionClicked,
+            this, [this](int visual) {
+        const int logical = table_->horizontalHeader()->logicalIndex(visual);
+        if (logical < 0) return;
+        const int modelCol = model_->visibleColumns().value(logical, -1);
+        if (modelCol == FileTableModel::ColPreview ||
+            modelCol == FileTableModel::ColComment) {
+            // Sorting forbidden per spec 2.4 — keep the current indicator.
+            updateSortIndicator();
+            return;
+        }
+        Qt::SortOrder order = Qt::AscendingOrder;
+        if (modelCol == model_->sortColumn())
+            order = (model_->sortOrder() == Qt::AscendingOrder)
+                        ? Qt::DescendingOrder : Qt::AscendingOrder;
+        sortByModelColumn(modelCol, order);
+    });
     // After a header drag-reorder or any model reset/sort, re-apply sensible
     // widths to the visual sections (model columns may have moved around).
     connect(table_->horizontalHeader(), &QHeaderView::sectionMoved,
-            this, [this] { applyTableColumnWidths(); });
+            this, [this] { applyTableColumnWidths(); updateSortIndicator(); });
     connect(model_, &QAbstractItemModel::modelReset,
             this, [this] { QTimer::singleShot(0, this, [this] { applyTableColumnWidths(); }); });
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
@@ -653,14 +680,48 @@ void MainWindow::onScanFinished(DirScanResult res) {
     DBG(QStringLiteral("scan finished: dir=%1 rows=%2 ok=%3 broken=%4")
         .arg(res.dir).arg(res.rows.size()).arg(ok).arg(brokenCnt));
     model_->setRows(res.rows);
-    model_->sort(FileTableModel::ColName, Qt::AscendingOrder);
-    applyTableColumnWidths();
+    sortByModelColumn(model_->sortColumn(), model_->sortOrder());
     // lazy prefetch of first N previews (spec 2.4)
     int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(res.rows.size()));
     const QString mode = Settings::instance().tablePreviewMode();
     for (int i = 0; i < n; ++i)
         if (!res.rows[i].broken)
             requestPreview(i);
+}
+
+// Sort the model by a *model* column id and keep the header indicator,
+// widths and the selected row in sync afterwards.
+void MainWindow::sortByModelColumn(int modelCol, Qt::SortOrder order) {
+    // Remember the selection by file path — sorting resets the model, so
+    // row indices are not stable across it.
+    QString selPath;
+    const int row = currentRow();
+    if (row >= 0 && row < model_->rows().size())
+        selPath = model_->rows()[row].path;
+
+    model_->sortByModelColumn(modelCol, order);
+    updateSortIndicator();
+    applyTableColumnWidths();
+
+    if (!selPath.isEmpty()) {
+        const auto &rows = model_->rows();
+        for (int i = 0; i < rows.size(); ++i) {
+            if (rows[i].path == selPath) {
+                table_->selectRow(i);
+                break;
+            }
+        }
+    }
+}
+
+// Map the current sort column back to its visual header section so the
+// indicator stays on the right column after drag-reordering.
+void MainWindow::updateSortIndicator() {
+    if (!table_ || !model_) return;
+    const int vis = model_->visibleColumns().indexOf(model_->sortColumn());
+    if (vis < 0) { table_->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder); return; }
+    table_->horizontalHeader()->setSortIndicator(
+        table_->horizontalHeader()->visualIndex(vis), model_->sortOrder());
 }
 
 // Set a comfortable width for every visible section, mapping the visual
