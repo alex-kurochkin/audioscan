@@ -11,6 +11,7 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <functional>
+class QProcess;
 #include "AudioFile.h"
 #include "FileDialogModel.h"
 #include "AudioView.h"
@@ -93,5 +94,12 @@ private:
     QVector<Marker> markers_;
     UndoStack undoStack_;
     AudioPlayer player_;
+    // Direct ffmpeg fallback: when neither Qt Multimedia nor the in-process
+    // pipe sinks can produce sound, we spawn "ffmpeg -re -i tmpfile" so that
+    // playback always works. playProc_ owns the temp file path.
+    QProcess *playProc_ = nullptr;
+    QString playTmpPath_;
+    void startFfmpegFallback(qint64 startSec, qint64 endSec);
+    void stopFfmpegFallback();
     PreviewWorker *previewWorker_ = nullptr;
 };

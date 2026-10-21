@@ -20,6 +20,9 @@
 #include <QStorageInfo>
 #include <QThread>
 #include <QTimer>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryFile>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QThreadPool>
@@ -653,6 +656,7 @@ void MainWindow::playPause() {
     if (!audio_.valid) return;
     if (player_.isPlaying()) {
         player_.pause();
+        stopFfmpegFallback();
         playBtn_->setText(tr("Play"));
         return;
     }
@@ -662,14 +666,99 @@ void MainWindow::playPause() {
         start = view_->selStart();
         end = view_->selEnd();
     }
-    player_.play(start, end, loopBtn_->isChecked());
-    playBtn_->setText(tr("Pause"));
+    // If the previous session ended instantly (no usable output device was
+    // found), go straight to the external ffmpeg fallback instead of
+    // "blinking" the Play button again.
+    const bool sinkAvailable = !QMediaDevices::defaultAudioOutput().isNull();
+    if (sinkAvailable) {
+        const qint64 posBefore = player_.currentFrame();
+        player_.play(start, end, loopBtn_->isChecked());
+        if (player_.isPlaying()) {
+            playBtn_->setText(tr("Pause"));
+            return;
+        }
+        // Playback died immediately — fall through to ffmpeg below.
+        Q_UNUSED(posBefore);
+    }
+    startFfmpegFallback(double(start) / audio_.sampleRate,
+                        double(end) / audio_.sampleRate);
+    if (playProc_ && playProc_->state() == QProcess::Running) {
+        playBtn_->setText(tr("Pause"));
+    } else {
+        statusBar()->showMessage(tr("No audio output available (check PulseAudio/PipeWire/ALSA or install ffmpeg)"), 5000);
+        playBtn_->setText(tr("Play"));
+    }
 }
 
 void MainWindow::stopPlayback() {
     player_.stop();
+    stopFfmpegFallback();
     playBtn_->setText(tr("Play"));
     view_->setPlayheadFrame(player_.currentFrame());
+}
+
+// ---------------- ffmpeg direct-playback fallback ----------------
+
+void MainWindow::startFfmpegFallback(qint64 startSec, qint64 endSec) {
+    stopFfmpegFallback();
+    QString ff = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ff.isEmpty()) return;
+
+    // Write a temp WAV copy of the current buffer so ffmpeg has a reliable,
+    // seekable input regardless of the original container/codec.
+    playTmpPath_ = QDir(QDir::tempPath())
+                      .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
+    QTemporaryFile tmp(playTmpPath_);
+    tmp.setAutoRemove(false);
+    if (!tmp.open()) return;
+    playTmpPath_ = tmp.fileName();
+    tmp.close();
+
+    AudioData copy = audio_;
+    QString err;
+    if (!AudioFile::save(playTmpPath_, copy, &err)) {
+        QFile::remove(playTmpPath_);
+        playTmpPath_.clear();
+        return;
+    }
+
+    playProc_ = new QProcess(this);
+    connect(playProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this, [this](int, QProcess::ExitStatus) {
+                if (playProc_) { playProc_->deleteLater(); playProc_ = nullptr; }
+                QFile::remove(playTmpPath_);
+                playTmpPath_.clear();
+                if (playBtn_) playBtn_->setText(tr("Play"));
+            });
+    QStringList args;
+    args << "-hide_banner" << "-loglevel" << "quiet" << "-nodisp" << "-re";
+    if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
+    if (endSec > startSec) args << "-t" << QString::number(endSec - startSec, 'f', 3);
+    args << "-i" << playTmpPath_ << "-vn" << "-autoexit";
+    playProc_->setProgram(ff);
+    playProc_->setArguments(args);
+    playProc_->start();
+    if (!playProc_->waitForStarted(3000)) {
+        playProc_->deleteLater();
+        playProc_ = nullptr;
+        QFile::remove(playTmpPath_);
+        playTmpPath_.clear();
+    }
+}
+
+void MainWindow::stopFfmpegFallback() {
+    if (!playProc_) return;
+    playProc_->disconnect(this);
+    if (playProc_->state() != QProcess::NotRunning) {
+        playProc_->kill();
+        playProc_->waitForFinished(500);
+    }
+    playProc_->deleteLater();
+    playProc_ = nullptr;
+    if (!playTmpPath_.isEmpty()) {
+        QFile::remove(playTmpPath_);
+        playTmpPath_.clear();
+    }
 }
 
 void MainWindow::prevFile() {
