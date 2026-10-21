@@ -93,6 +93,8 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     loopEnd_ = endFrame;
     looping_ = loop;
     playing_ = true;
+    paused_ = false;
+    qtSinkMode_ = useQtSink;
 
     if (useQtSink) {
         connect(sink_, &QAudioSink::stateChanged, this, [this](QAudio::State st) {
@@ -236,12 +238,32 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
 void AudioPlayer::pause() {
     if (!playing_) return;
     playing_ = false;
+    paused_ = true;
     if (pump_) pump_->stop();
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
 }
 
+void AudioPlayer::resume() {
+    if (playing_ || !paused_) return;
+    // Continue from the position where we paused; keep the original
+    // play-start point so Stop still rewinds there (spec 2.6).
+    paused_ = false;
+    playing_ = true;
+    if (qtSinkMode_) {
+        if (device_ && !device_->isOpen()) device_->open(QIODevice::ReadOnly);
+        sink_->start(device_);
+    } else {
+        if (!pump_) {
+            pump_ = new QTimer(this);
+            connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
+        }
+        pump_->start(pumpPeriodMs_ > 0 ? pumpPeriodMs_ : 20);
+    }
+}
+
 void AudioPlayer::resumeOrStopToggle() {
     if (playing_) pause();
+    else if (paused_) resume();
     else play(startFrames_, loopEnd_, looping_);
 }
 
@@ -250,6 +272,7 @@ void AudioPlayer::stop() {
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
     if (outDevice_) { outDevice_->close(); delete outDevice_; outDevice_ = nullptr; }
     playing_ = false;
+    paused_ = false;
     posFrames_ = startFrames_;   // rewind to the point where Play started
     emit positionChanged(posFrames_);
 }

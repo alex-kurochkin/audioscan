@@ -46,6 +46,7 @@ private slots:
     void loadCurrentFile();
     void playPause();
     void stopPlayback();
+    void updatePlayButton();
     void prevFile();
     void nextFile();
     void doMute();

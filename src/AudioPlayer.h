@@ -28,9 +28,11 @@ public:
 
     void play(qint64 startFrame, qint64 endFrame, bool loop);  // end<=start => play to file end
     void pause();
+    void resume();   // continue from the paused position (no rewind)
     void resumeOrStopToggle();
     void stop();     // stops and returns position to last play-start point
     bool isPlaying() const { return playing_; }
+    bool isPaused() const { return paused_; }
 
     void setVolume(double v) { volume_ = v; }        // internal gain 0..1
     double volume() const { return volume_; }
@@ -80,5 +82,7 @@ private:
     qint64 loopStart_ = 0, loopEnd_ = 0;
     bool looping_ = false;
     bool playing_ = false;
+    bool paused_ = false;        // paused mid-playback, resumable from posFrames_
+    bool qtSinkMode_ = false;    // true: QAudioSink pull mode; false: timer pump
     double volume_ = 0.8;
 };

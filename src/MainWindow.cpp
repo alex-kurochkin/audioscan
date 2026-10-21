@@ -435,6 +435,10 @@ void MainWindow::buildUi() {
     connect(&player_, &AudioPlayer::finished, this, [this] {
         playBtn_->setText(tr("Play"));
     });
+    // Safety net: whenever the Qt sink state changes (finish, device error,
+    // external stop), sync the button so it never sticks on "Pause".
+    connect(&player_, &AudioPlayer::positionChanged, this,
+            [this] { updatePlayButton(); });
 
     // Audio output strategy: prefer Qt Multimedia's own QAudioSink; if the
     // default device is null or rejects our format, fall back to piping raw
@@ -540,7 +544,8 @@ void MainWindow::applyHotkeys() {
         auto *sc = new QShortcut(QKeySequence(spaceSeq), this, nullptr, nullptr, Qt::WindowShortcut);
         connect(sc, &QShortcut::activated, this, [this] {
             if (Settings::instance().spaceStartStop()) {
-                if (player_.isPlaying()) stopPlayback();
+                const bool running = player_.isPlaying() || player_.isPaused() || playProc_;
+                if (running) stopPlayback();
                 else playPause();
             } else {
                 playPause();
@@ -706,12 +711,27 @@ void MainWindow::playPause() {
         playBtn_->setText(tr("Play"));
         return;
     }
+    if (player_.isPaused()) {           // resume Qt playback where we left off
+        player_.resume();
+        playBtn_->setText(tr("Pause"));
+        return;
+    }
     if (playProc_) {                     // external fallback is running: pause it
         qint64 cur = view_->playheadFrame();
         stopFfmpegFallback();            // keeps fbStart/End/Loop, resets wasPlaying_
         if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
         view_->setPlayheadFrame(cur);    // resume point remembered by -ss below
         playBtn_->setText(tr("Play"));
+        return;
+    }
+    // Paused ffmpeg fallback: resume from the playhead position.
+    if (fbStartFrame_ > 0 || fbEndFrame_ > 0) {
+        qint64 cur = view_->playheadFrame();
+        if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
+        startFfmpegFallback(cur, fbEndFrame_, fbLooping_);
+        playBtn_->setText(playProc_ ? tr("Pause") : tr("Play"));
+        if (!playProc_)
+            statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
         return;
     }
 
@@ -762,6 +782,15 @@ void MainWindow::stopPlayback() {
     fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
     playBtn_->setText(tr("Play"));
     view_->setPlayheadFrame(player_.currentFrame());
+}
+
+// Keep the Play/Pause button in sync with the Qt sink state. The sink can
+// finish on its own (end of file, device error) while we believe it is
+// playing; without this the button would stay stuck on "Pause".
+void MainWindow::updatePlayButton() {
+    if (!playBtn_) return;
+    const bool running = player_.isPlaying() || (playProc_ && wasPlaying_);
+    playBtn_->setText(running ? tr("Pause") : tr("Play"));
 }
 
 // ---------------- ffmpeg direct-playback fallback ----------------
@@ -941,7 +970,11 @@ void MainWindow::stopFfmpegFallback() {
 
 void MainWindow::prevFile() {
     int row = currentRow();
-    if (row > 0) { table_->selectRow(row - 1); table_->scrollTo(model_->index(row - 1, 0)); }
+    if (row > 0) {
+        table_->selectRow(row - 1);
+        table_->scrollTo(model_->index(row - 1, 0));
+        loadCurrentFile();   // prev/next load the file immediately
+    }
 }
 
 void MainWindow::nextFile() {
@@ -949,6 +982,7 @@ void MainWindow::nextFile() {
     if (row >= 0 && row + 1 < model_->rows().size()) {
         table_->selectRow(row + 1);
         table_->scrollTo(model_->index(row + 1, 0));
+        loadCurrentFile();   // prev/next load the file immediately
     } else {
         stopPlayback();   // end of list -> stop (spec 2.6)
     }
