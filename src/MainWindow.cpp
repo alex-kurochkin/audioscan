@@ -976,6 +976,11 @@ void MainWindow::stopFfmpegFallback() {
 void MainWindow::prevFile() {
     int row = currentRow();
     if (row > 0) {
+        if (player_.isPlaying() || playProc_) {
+            player_.stop();
+            stopFfmpegFallback();
+            playBtn_->setText(tr("Play"));
+        }
         table_->selectRow(row - 1);
         table_->scrollTo(model_->index(row - 1, 0));
         loadCurrentFile();   // prev/next load the file immediately
@@ -985,6 +990,11 @@ void MainWindow::prevFile() {
 void MainWindow::nextFile() {
     int row = currentRow();
     if (row >= 0 && row + 1 < model_->rows().size()) {
+        if (player_.isPlaying() || playProc_) {
+            player_.stop();
+            stopFfmpegFallback();
+            playBtn_->setText(tr("Play"));
+        }
         table_->selectRow(row + 1);
         table_->scrollTo(model_->index(row + 1, 0));
         loadCurrentFile();   // prev/next load the file immediately
