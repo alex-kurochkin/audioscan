@@ -31,6 +31,11 @@ public:
     void resume();   // continue from the paused position (no rewind)
     void resumeOrStopToggle();
     void stop();     // stops and returns position to last play-start point
+    // Jump to a new position while keeping playback state: if currently
+    // playing or paused, output continues from frame (a paused session stays
+    // paused at the new position). Outside an active session it only moves
+    // the remembered position.
+    void seek(qint64 frame);
     bool isPlaying() const { return playing_; }
     bool isPaused() const { return paused_; }
 

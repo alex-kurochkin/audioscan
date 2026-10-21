@@ -115,5 +115,9 @@ private:
     void startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop);
     void stopFfmpegFallback();
     void resumeFfmpegFallback();
+    // Seek during playback: moves the playhead and continues from the new
+    // position in whichever output path is active (Qt sink, pipe fallback or
+    // external ffmpeg process). No-op when nothing is playing.
+    void seekPlaybackTo(qint64 frame);
     PreviewWorker *previewWorker_ = nullptr;
 };
