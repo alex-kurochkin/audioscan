@@ -3,6 +3,7 @@
 #include <QAudioFormat>
 #include <QObject>
 #include <QIODevice>
+#include <QTimer>
 #include <cstdint>
 #include <functional>
 
@@ -14,10 +15,12 @@ public:
     explicit AudioPlayer(QObject *parent = nullptr);
     ~AudioPlayer() override;
 
-    // Sink factory: creates the output sink for a given format. Defaults to a
-    // real QAudioSink on the default audio device; can be replaced (e.g. with
-    // an "aplay" pipe fallback when Qt Multimedia has no usable device).
-    using SinkFactory = std::function<QAudioSink *(const QAudioFormat &)>;
+    // Sink factory: creates the output device for a given format. The device
+    // must already be opened WriteOnly and parented to this AudioPlayer; it is
+    // passed directly to QAudioSink::start(). Defaults to nullptr (real
+    // QAudioSink on the default audio device); can be replaced (e.g. with an
+    // "aplay"/"ffplay" pipe fallback when Qt Multimedia has no usable device).
+    using SinkFactory = std::function<QIODevice *(const QAudioFormat &)>;
     void setSinkFactory(SinkFactory f) { sinkFactory_ = std::move(f); }
 
     // Set the whole decoded buffer (interleaved float32).
@@ -51,6 +54,7 @@ private:
     };
 
     friend class FloatPcmDevice;
+    void pumpAudio();
     qint64 generateBytes(char *out, qint64 maxBytes);
 
     const float *buf_ = nullptr;
@@ -61,6 +65,15 @@ private:
     QAudioSink *sink_ = nullptr;
     FloatPcmDevice *device_ = nullptr;
     SinkFactory sinkFactory_;
+
+    // External-player fallback (aplay/ffplay pipe): push-mode pump.
+    QIODevice *outDevice_ = nullptr;
+    QAudioFormat outFmt_;
+    QTimer *pump_ = nullptr;
+    QByteArray pumpBuf_;
+    qint64 pumpBytesPerTick_ = 0;
+    qint64 pumpFrameBytes_ = 0;
+    int pumpPeriodMs_ = 20;
 
     qint64 posFrames_ = 0;       // next frame to output
     qint64 startFrames_ = 0;     // where Play began (for Stop rewind)

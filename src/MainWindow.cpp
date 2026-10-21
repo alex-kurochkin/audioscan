@@ -26,64 +26,99 @@
 #include <QVBoxLayout>
 #include <QMediaDevices>
 #include <QProcess>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <algorithm>
 #include <cmath>
 
-// Fallback sink: when Qt Multimedia has no usable audio output device
-// (missing PulseAudio/PipeWire plugins), pipe raw PCM to the ALSA "aplay"
-// utility via a QProcess-backed QIODevice. QAudioSink accepts any
-// QIODevice that supports write, so this keeps playback working.
-class AplaySink : public QIODevice {
+// Fallback sinks: when Qt Multimedia has no usable audio output device
+// (missing PulseAudio/PipeWire plugins), pipe raw PCM to an external player
+// via a QProcess-backed QIODevice. QAudioSink accepts any QIODevice that
+// supports write, so this keeps playback working even in bare environments.
+class ProcessSink : public QIODevice {
 public:
-    explicit AplaySink(const QAudioFormat &fmt, QObject *parent = nullptr)
-        : QIODevice(parent), fmt_(fmt) {}
-    ~AplaySink() override { close(); }
+    explicit ProcessSink(const QString &program, const QStringList &args,
+                         QObject *parent = nullptr)
+        : QIODevice(parent), program_(program), args_(args) {}
+    ~ProcessSink() override { shutdown(); }
 
 protected:
     qint64 readData(char *, qint64) override { return 0; }
     qint64 writeData(const char *data, qint64 len) override {
-        if (!proc_) {
-            proc_ = new QProcess(this);
-            QStringList args;
-            args << "-q" << "-t" << "raw"
-                 << "-c" << QString::number(fmt_.channelCount())
-                 << "-r" << QString::number(fmt_.sampleRate())
-                 << "-f" << sampleFormatTag();
-            proc_->setProgram(QStringLiteral("aplay"));
-            proc_->setArguments(args);
-            proc_->setProcessChannelMode(QProcess::ForwardedErrorChannel);
-            proc_->start();
-            if (!proc_->waitForStarted(3000)) {
-                delete proc_; proc_ = nullptr;
-                return -1;
-            }
-        }
-        if (proc_->state() != QProcess::Running) return -1;
+        if (!ensureStarted()) return -1;
         proc_->write(data, len);
         proc_->waitForBytesWritten(500);
         return len;
     }
-    void close() {
-        if (proc_) {
-            proc_->closeWriteChannel();
-            proc_->waitForFinished(300);
-            if (proc_->state() == QProcess::Running) proc_->terminate();
-        }
-    }
+    void close() override { shutdown(); }
 
 private:
-    QString sampleFormatTag() const {
-        switch (fmt_.sampleFormat()) {
-        case QAudioFormat::Int16:  return QStringLiteral("S16_LE");
-        case QAudioFormat::Int32:  return QStringLiteral("S32_LE");
-        case QAudioFormat::Float:  return QStringLiteral("F32_LE");
-        case QAudioFormat::UInt8:  return QStringLiteral("U8");
-        default:                   return QStringLiteral("S16_LE");
+    bool ensureStarted() {
+        if (proc_) {
+            if (proc_->state() == QProcess::NotRunning &&
+                proc_->exitStatus() != QProcess::NormalExit)
+                return false;   // crashed earlier — don't retry
+            return proc_->state() == QProcess::Running;
+        }
+        proc_ = new QProcess(this);
+        proc_->setProgram(program_);
+        proc_->setArguments(args_);
+        proc_->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+        proc_->start();
+        if (!proc_->waitForStarted(3000)) {
+            qWarning().noquote()
+                << QStringLiteral("AudioPlayer: failed to start '%1'").arg(program_);
+            delete proc_;
+            proc_ = nullptr;
+            return false;
+        }
+        return true;
+    }
+    void shutdown() {
+        if (!proc_) return;
+        proc_->closeWriteChannel();
+        proc_->waitForFinished(300);
+        if (proc_->state() == QProcess::Running) {
+            proc_->terminate();
+            if (!proc_->waitForFinished(300)) proc_->kill();
         }
     }
-    QAudioFormat fmt_;
+    QString program_;
+    QStringList args_;
     QProcess *proc_ = nullptr;
 };
+
+static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
+    auto tag = [](QAudioFormat::SampleFormat sf) -> QString {
+        switch (sf) {
+        case QAudioFormat::Int16: return QStringLiteral("S16_LE");
+        case QAudioFormat::Int32: return QStringLiteral("S32_LE");
+        case QAudioFormat::Float: return QStringLiteral("F32_LE");
+        case QAudioFormat::UInt8: return QStringLiteral("U8");
+        default:                  return QStringLiteral("S16_LE");
+        }
+    };
+    QStringList args;
+    args << "-q" << "-t" << "raw"
+         << "-c" << QString::number(fmt.channelCount())
+         << "-r" << QString::number(fmt.sampleRate())
+         << "-f" << tag(fmt.sampleFormat());
+    auto *s = new ProcessSink(QStringLiteral("aplay"), args, parent);
+    s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
+    return s;
+}
+
+static QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
+    QStringList args;
+    args << "-nodisp" << "-autoexit" << "-loglevel" << "quiet"
+         << "-f" << "f32le"
+         << "-ar" << QString::number(fmt.sampleRate())
+         << "-ac" << QString::number(fmt.channelCount())
+         << "-i" << "-";
+    auto *s = new ProcessSink(QStringLiteral("ffplay"), args, parent);
+    s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
+    return s;
+}
 
 
 // Directory tree model: only directories are listed (spec 2.3), and their
@@ -362,22 +397,23 @@ void MainWindow::buildUi() {
         playBtn_->setText(tr("Play"));
     });
 
-    // If Qt Multimedia cannot initialize audio at all (no session bus /
-    // missing plugins), fall back to piping PCM to the "aplay" ALSA utility.
-    if (!QMediaDevices::defaultAudioOutput().isNull()) {
-        player_.setSinkFactory([](const QAudioFormat &fmt) -> QAudioSink * {
-            return new QAudioSink(QMediaDevices::defaultAudioOutput(), fmt);
-        });
-    } else {
-        qWarning() << "MainWindow: no default audio output device; using aplay fallback";
-        player_.setSinkFactory([](const QAudioFormat &fmt) -> QAudioSink * {
-            static bool warned = false;
-            if (!warned) { warned = true; qWarning() << "AudioPlayer: QAudioSink unavailable, trying aplay"; }
-            auto *sink = new AplaySink(fmt);
-            sink->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
-            return sink;
-        });
-    }
+    // Audio output strategy: prefer Qt Multimedia's own QAudioSink; if the
+    // default device is null or rejects our format, fall back to piping raw
+    // PCM to "aplay" (ALSA) and then "ffplay" (ffmpeg). The factory returns
+    // an opened write-only QIODevice; AudioPlayer wraps it in a QAudioSink.
+    player_.setSinkFactory([this](const QAudioFormat &fmt) -> QIODevice * {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            qWarning() << "MainWindow: Qt audio output unavailable, trying aplay/ffplay fallback";
+        }
+        if (QFileInfo::exists(QStringLiteral("/usr/bin/aplay")) ||
+            !QStandardPaths::findExecutable(QStringLiteral("aplay")).isEmpty())
+            return makeAplaySink(fmt, &player_);
+        if (!QStandardPaths::findExecutable(QStringLiteral("ffplay")).isEmpty())
+            return makeFfplaySink(fmt, &player_);
+        return nullptr;
+    });
 
     previewWorker_ = new PreviewWorker(this);
     connect(previewWorker_, &PreviewWorker::ready, this, [this](const QString &path, const QString &imgPath) {
