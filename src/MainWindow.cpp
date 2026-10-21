@@ -1,0 +1,852 @@
+#include "MainWindow.h"
+#include "Settings.h"
+#include "Database.h"
+#include "Renderer.h"
+#include "MarkerDialog.h"
+#include "SettingsDialog.h"
+#include "PreviewWorker.h"
+
+#include <QApplication>
+#include <QCloseEvent>
+#include <QHeaderView>
+#include <QLabel>
+#include <QMenu>
+#include <QMessageBox>
+#include <QShortcut>
+#include <QInputDialog>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QThreadPool>
+#include <algorithm>
+#include <cmath>
+
+// ---------------- helpers ----------------
+
+// ---------------- construction ----------------
+
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    buildUi();
+    applyHotkeys();
+    connect(&Settings::instance(), &Settings::changed, this, &MainWindow::applyHotkeys);
+
+    // restore last session state
+    QString dir, file; double pos;
+    Database::instance().getSessionState(dir, file, pos);
+    if (!dir.isEmpty() && QDir(dir).exists()) {
+        tree_->setCurrentIndex(fsModel_->index(dir));
+        onDirSelected(dir);
+    } else {
+        onDirSelected(QDir::homePath());
+        tree_->setCurrentIndex(fsModel_->index(QDir::homePath()));
+    }
+}
+
+MainWindow::~MainWindow() = default;
+
+void MainWindow::closeEvent(QCloseEvent *e) {
+    player_.stop();
+    Database::instance().setSessionState(
+        currentDir_, currentPath_,
+        audio_.sampleRate ? double(view_->cursorFrame()) / audio_.sampleRate : 0.0);
+    e->accept();
+}
+
+// ---------------- UI ----------------
+
+void MainWindow::buildUi() {
+    setWindowTitle(QStringLiteral("AudioScout"));
+    resize(1280, 860);
+
+    fsModel_ = new QFileSystemModel(this);
+    fsModel_->setRootPath(QDir::rootPath());
+    fsModel_->setNameFilterDisables(false);
+
+    auto *central = new QWidget(this);
+    auto *outer = new QVBoxLayout(central);
+    outer->setContentsMargins(4, 4, 4, 4);
+    setCentralWidget(central);
+
+    // ---- top toolbar ----
+    auto *tb = new QToolBar(this);
+    tb->setMovable(false);
+    addToolBar(Qt::TopToolBarArea, tb);
+
+    searchEdit_ = new QLineEdit(tb);
+    searchEdit_->setPlaceholderText(tr("Search file by name..."));
+    searchEdit_->setClearButtonEnabled(true);
+    tb->addWidget(searchEdit_);
+    auto *searchBtn = new QPushButton(tr("Search"), tb);
+    tb->addWidget(searchBtn);
+    connect(searchBtn, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
+    connect(searchEdit_, &QLineEdit::returnPressed, this, &MainWindow::onSearchClicked);
+
+    columnsBtn_ = new QToolButton(tb);
+    columnsBtn_->setText(tr("Columns"));
+    columnsBtn_->setPopupMode(QToolButton::InstantPopup);
+    tb->addWidget(columnsBtn_);
+
+    tableModeCombo_ = new QComboBox(tb);
+    tableModeCombo_->addItems({tr("Wave preview"), tr("Spectrogram preview")});
+    tableModeCombo_->setCurrentIndex(Settings::instance().tablePreviewMode() == QLatin1String("spectrogram") ? 1 : 0);
+    tb->addWidget(new QLabel(tr(" Table: "), tb));
+    tb->addWidget(tableModeCombo_);
+
+    actRefreshPrev_ = new QAction(tr("Refresh previews"), tb);
+    tb->addAction(actRefreshPrev_);
+
+    actZoomIn_ = tb->addAction(tr("+Z"));
+    actZoomOut_ = tb->addAction(tr("-Z"));
+
+    actSettings_ = tb->addAction(tr("Settings"));
+
+    connect(actRefreshPrev_, &QAction::triggered, this, &MainWindow::refreshPreviewsForDir);
+    connect(actZoomIn_, &QAction::triggered, view_, &AudioView::zoomIn);
+    connect(actZoomOut_, &QAction::triggered, view_, &AudioView::zoomOut);
+    connect(actSettings_, &QAction::triggered, this, &MainWindow::showSettings);
+    connect(tableModeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        Settings::instance().setTablePreviewMode(idx == 1 ? QStringLiteral("spectrogram")
+                                                          : QStringLiteral("wave"));
+        refreshPreviewsForDir();
+    });
+
+    // ---- splitter: tree | table ----
+    auto *splitter = new QSplitter(Qt::Horizontal, central);
+    outer->addWidget(splitter, 1);
+
+    tree_ = new QTreeView(splitter);
+    tree_->setModel(fsModel_);
+    tree_->setRootIndex(fsModel_->index(QDir::rootPath()));
+    tree_->setHeaderHidden(true);
+    splitter->addWidget(tree_);
+
+    auto *rightPanel = new QWidget(splitter);
+    auto *rightLay = new QVBoxLayout(rightPanel);
+    rightLay->setContentsMargins(0, 0, 0, 0);
+
+    model_ = new FileTableModel(rightPanel);
+    table_ = new QTableView(rightPanel);
+    table_->setModel(model_);
+    table_->setSortingEnabled(true);
+    table_->horizontalHeader()->setSortIndicatorShown(true);
+    table_->horizontalHeader()->setSectionsMovable(true);   // drag to reorder (spec 2.4)
+    table_->horizontalHeader()->setSectionsClickable(true);
+    table_->verticalHeader()->setVisible(false);
+    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    table_->setIconSize(QSize(340, 20));
+    table_->setColumnWidth(0, 220);
+    table_->horizontalHeader()->setStretchLastSection(true);
+    rightLay->addWidget(table_, 1);
+    splitter->addWidget(rightPanel);
+    splitter->setSizes({260, 900});
+
+    connect(tree_, &QTreeView::clicked, this, [this](const QModelIndex &i) {
+        onDirSelected(fsModel_->filePath(i));
+    });
+    connect(tree_, &QTreeView::expanded, this, [this](const QModelIndex &i) {
+        onDirSelected(fsModel_->filePath(i));
+    });
+    connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged,
+            this, &MainWindow::onRowClicked);
+    connect(model_, &FileDialogModel::previewRequested, this, &MainWindow::requestPreview);
+
+    // ---- action panel (active file) ----
+    auto *actionsBar = new QWidget(central);
+    auto *ab = new QHBoxLayout(actionsBar);
+    ab->setContentsMargins(0, 2, 0, 2);
+    auto *muteBtn = new QPushButton(tr("Mute"), actionsBar);
+    auto *normBtn = new QPushButton(tr("Normalize"), actionsBar);
+    normLevel_ = new QDoubleSpinBox(actionsBar);
+    normLevel_->setRange(-60.0, 0.0);
+    normLevel_->setValue(-1.0);
+    normLevel_->setSuffix(QStringLiteral(" dBFS"));
+    auto *delSelBtn = new QPushButton(tr("Delete selection"), actionsBar);
+    auto *delAllMarksBtn = new QPushButton(tr("Delete all markers"), actionsBar);
+    auto *renameBtn = new QPushButton(tr("Rename..."), actionsBar);
+    ab->addWidget(muteBtn);
+    ab->addWidget(normBtn);
+    ab->addWidget(normLevel_);
+    ab->addWidget(delSelBtn);
+    ab->addWidget(delAllMarksBtn);
+    ab->addWidget(renameBtn);
+    ab->addStretch(1);
+    outer->addWidget(actionsBar);
+
+    connect(muteBtn, &QPushButton::clicked, this, &MainWindow::doMute);
+    connect(normBtn, &QPushButton::clicked, this, &MainWindow::doNormalize);
+    connect(delSelBtn, &QPushButton::clicked, this, &MainWindow::doDeleteSelection);
+    connect(delAllMarksBtn, &QPushButton::clicked, this, &MainWindow::deleteAllMarkersForFile);
+    connect(renameBtn, &QPushButton::clicked, this, &MainWindow::renameCurrentFile);
+
+    // ---- player bar ----
+    auto *playerBar = new QWidget(central);
+    auto *pb = new QHBoxLayout(playerBar);
+    pb->setContentsMargins(0, 2, 0, 2);
+    auto *prevBtn = new QPushButton(tr("|<"), playerBar);
+    playBtn_ = new QPushButton(tr("Play"), playerBar);
+    auto *stopBtn = new QPushButton(tr("Stop"), playerBar);
+    auto *nextBtn = new QPushButton(tr(">|"), playerBar);
+    loopBtn_ = new QPushButton(tr("Loop"), playerBar);
+    loopBtn_->setCheckable(true);
+    volumeSlider_ = new QSlider(Qt::Horizontal, playerBar);
+    volumeSlider_->setRange(0, 100);
+    volumeSlider_->setValue(int(Settings::instance().volume() * 100));
+    volumeSlider_->setFixedWidth(140);
+    playerModeCombo_ = new QComboBox(playerBar);
+    playerModeCombo_->addItems({tr("Waveform"), tr("Spectrogram")});
+    playerModeCombo_->setCurrentIndex(Settings::instance().playerMode() == QLatin1String("spectrogram") ? 1 : 0);
+    auto *zin = new QPushButton(tr("Zoom +"), playerBar);
+    auto *zout = new QPushButton(tr("Zoom -"), playerBar);
+
+    pb->addWidget(prevBtn);
+    pb->addWidget(playBtn_);
+    pb->addWidget(stopBtn);
+    pb->addWidget(nextBtn);
+    pb->addWidget(loopBtn_);
+    pb->addSpacing(12);
+    pb->addWidget(new QLabel(tr("Volume"), playerBar));
+    pb->addWidget(volumeSlider_);
+    pb->addSpacing(12);
+    pb->addWidget(new QLabel(tr("Display"), playerBar));
+    pb->addWidget(playerModeCombo_);
+    pb->addStretch(1);
+    pb->addWidget(zin);
+    pb->addWidget(zout);
+    outer->addWidget(playerBar);
+
+    connect(prevBtn, &QPushButton::clicked, this, &MainWindow::prevFile);
+    connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
+    connect(playBtn_, &QPushButton::clicked, this, &MainWindow::playPause);
+    connect(stopBtn, &QPushButton::clicked, this, &MainWindow::stopPlayback);
+    connect(volumeSlider_, &QSlider::valueChanged, this, [this](int v) {
+        player_.setVolume(v / 100.0);
+        Settings::instance().setVolume(v / 100.0);
+    });
+    connect(playerModeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        QString mode = idx == 1 ? QStringLiteral("spectrogram") : QStringLiteral("wave");
+        Settings::instance().setPlayerMode(mode);
+        view_->setMode(mode);
+    });
+    connect(zin, &QPushButton::clicked, view_, &AudioView::zoomIn);
+    connect(zout, &QPushButton::clicked, view_, &AudioView::zoomOut);
+
+    // ---- visualization area ----
+    view_ = new AudioView(central);
+    outer->addWidget(view_, 2);
+    view_->setMode(Settings::instance().playerMode());
+
+    connect(view_, &AudioView::selectionChanged, this, [this](qint64, qint64) { /* info only */ });
+    connect(view_, &AudioView::markerDoubleClickedEmpty, this, [this](qint64 f, bool) {
+        createMarkerAt(f);
+    });
+    connect(view_, &AudioView::doubleClickBetweenMarkers, this, [this](qint64 a, qint64 b) {
+        view_->setSelectionRange(a, b);
+    });
+    connect(view_, &AudioView::markerClicked, this, &MainWindow::onMarkerClicked);
+    connect(view_, &AudioView::markerMoved, this, [this](int, qint64) { persistMarkers(); });
+    connect(view_, &AudioView::cursorMoved, this, [this](qint64 f) {
+        if (!player_.isPlaying() && audio_.valid)
+            Database::instance().setSessionState(currentDir_, currentPath_,
+                                                 double(f) / audio_.sampleRate);
+    });
+
+    connect(&player_, &AudioPlayer::positionChanged, this, [this](qint64 f) {
+        view_->setPlayheadFrame(f);
+    });
+    connect(&player_, &AudioPlayer::finished, this, [this] {
+        playBtn_->setText(tr("Play"));
+    });
+
+    previewWorker_ = new PreviewWorker(this);
+    connect(previewWorker_, &PreviewWorker::ready, this, [this](const QString &path, const QString &imgPath) {
+        if (imgPath.isEmpty()) return;
+        QImage img(imgPath);
+        if (img.isNull()) return;
+        const auto &rows = model_->rows();
+        for (int i = 0; i < rows.size(); ++i)
+            if (rows[i].path == path) { model_->setPreview(i, img); break; }
+    });
+
+    rebuildColumnMenu();
+}
+
+void MainWindow::rebuildColumnMenu() {
+    auto *menu = new QMenu(columnsBtn_);
+    const QStringList order = Settings::instance().visibleColumns();
+    QVector<int> visible;
+    for (const QString &key : order) {
+        int col = FileTableModel::columnFromKey(key);
+        if (col >= 0) visible << col;
+    }
+    for (int c = 0; c < int(FileTableModel::ColCount); ++c)
+        if (!visible.contains(c)) visible << c;
+
+    for (int c = 0; c < int(FileTableModel::ColCount); ++c) {
+        auto *act = menu->addAction(model_->columnName(c));
+        act->setCheckable(true);
+        act->setChecked(visible.contains(c));
+    }
+    connect(menu, &QMenu::aboutToShow, this, [this, menu] {
+        // sync check states from settings
+    });
+    connect(menu, &QMenu::triggered, this, [this, menu](QAction *) {
+        QVector<int> vis;
+        const auto acts = menu->actions();
+        for (int cc = 0; cc < acts.size(); ++cc)
+            if (acts[cc]->isChecked()) vis << cc;
+        model_->updateVisibleColumns(vis);
+        QStringList keys;
+        for (int cc : vis) keys << FileTableModel::columnKey(cc);
+        Settings::instance().setVisibleColumns(keys);
+    });
+    columnsBtn_->setMenu(menu);
+}
+
+// ---------------- hotkeys ----------------
+
+void MainWindow::applyHotkeys() {
+    // remove previous dynamic shortcuts
+    const auto old = findChildren<QShortcut *>();
+    for (auto *s : old) s->deleteLater();
+
+    auto add = [&](const QString &id, std::function<void()> fn, Qt::ShortcutContext ctx) {
+        QString seqStr = Settings::instance().shortcut(id);
+        if (seqStr.isEmpty()) return;
+        auto *sc = new QShortcut(QKeySequence(seqStr), this, nullptr, nullptr, ctx);
+        connect(sc, &QShortcut::activated, this, fn);
+    };
+
+    add("mute",       [this] { doMute(); }, Qt::WindowShortcut);
+    add("normalize",  [this] { doNormalize(); }, Qt::WindowShortcut);
+    add("prev",       [this] { prevFile(); }, Qt::WindowShortcut);
+    add("next",       [this] { nextFile(); }, Qt::WindowShortcut);
+    add("undo",       [this] { undo(); }, Qt::WindowShortcut);
+    add("redo",       [this] { redo(); }, Qt::WindowShortcut);
+    add("gotoStart",  [this] { view_->nudgeCursor(-view_->cursorFrame()); }, Qt::WindowShortcut);
+    add("zoomReset",  [this] { view_->zoomReset(); }, Qt::WindowShortcut);
+    add("addMarker",  [this] { createMarkerAt(view_->cursorFrame()); }, Qt::WindowShortcut);
+    add("deleteMarker",[this] {
+        int idx = view_->activeMarker();
+        if (idx >= 0 && idx < markers_.size()) {
+            markers_.remove(idx);
+            persistMarkers();
+            view_->setActiveMarkerIndex(-1);
+        }
+    }, Qt::WindowShortcut);
+    add("clearSelection",[this] { view_->clearSelection(); }, Qt::WindowShortcut);
+    add("zoomIn",     [this] { view_->zoomIn(); }, Qt::WindowShortcut);
+    add("zoomOut",    [this] { view_->zoomOut(); }, Qt::WindowShortcut);
+
+    // Space is context-sensitive per settings (start/stop vs start/pause)
+    QString spaceSeq = Settings::instance().shortcut("playpause");
+    if (!spaceSeq.isEmpty()) {
+        auto *sc = new QShortcut(QKeySequence(spaceSeq), this, nullptr, nullptr, Qt::WindowShortcut);
+        connect(sc, &QShortcut::activated, this, [this] {
+            if (Settings::instance().spaceStartStop()) {
+                if (player_.isPlaying()) stopPlayback();
+                else playPause();
+            } else {
+                playPause();
+            }
+        });
+    }
+    // second redo binding Ctrl+Y
+    auto *cy = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Y")), this);
+    connect(cy, &QShortcut::activated, this, [this] { redo(); });
+}
+
+// ---------------- directory scanning ----------------
+
+void MainWindow::onDirSelected(const QString &path) {
+    QFileInfo fi(path);
+    QString dir = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
+    if (dir.isEmpty() || !QDir(dir).exists()) return;
+    currentDir_ = dir;
+
+    // Background scan (spec 3.1/12): never block UI.
+    DirScanResult res{dir, {}};
+    auto future = QtConcurrent::run([dir]() {
+        QVector<FileDialogModel::Row> rows;
+        QDir d(dir);
+        const auto entries = d.entryInfoList(QDir::Files, QDir::Name);
+        for (const QFileInfo &fi : entries) {
+            if (!isAudioFile(fi.absoluteFilePath().toLower())) continue;
+            FileTableModel::Row r;
+            r.path = fi.absoluteFilePath();
+            r.name = fi.fileName();
+            r.size = fi.size();
+            r.created = fi.birthTime().isValid() ? fi.birthTime() : fi.metadataChangeTime();
+            r.modified = fi.lastModified();
+            AudioData meta;
+            QString err;
+            if (AudioFile::probe(r.path, meta, &err) && meta.valid) {
+                r.broken = false;
+                r.sampleRate = meta.sampleRate;
+                r.channels = meta.channels;
+                r.frames = meta.totalFrames;
+                r.sampleTypeName = meta.format == SampleFormat::Unknown
+                    ? QStringLiteral("compressed") : sampleFormatName(meta.format);
+                r.comment = meta.comment;
+            } else {
+                r.broken = true;   // red row, no params, no preview (spec 3.3)
+            }
+            rows.push_back(r);
+        }
+        return rows;
+    });
+    // poll-free completion via watcher
+    auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, dir]() {
+        DirScanResult res2{dir, watcher->result()};
+        watcher->deleteLater();
+        onScanFinished(res2);
+    });
+    watcher->setFuture(future);
+    Q_UNUSED(res);
+}
+
+void MainWindow::onScanFinished(DirScanResult res) {
+    if (res.dir != currentDir_) return;    // stale scan
+    model_->setRows(res.rows);
+    model_->sort(FileTableModel::ColName, Qt::AscendingOrder);
+    // lazy prefetch of first N previews (spec 2.4)
+    int n = std::min(Settings::instance().previewPrefetchCount(), res.rows.size());
+    const QString mode = Settings::instance().tablePreviewMode();
+    for (int i = 0; i < n; ++i)
+        if (!res.rows[i].broken)
+            requestPreview(i);
+}
+
+void MainWindow::requestPreview(int row) {
+    if (row < 0 || row >= model_->rows().size()) return;
+    const auto &r = model_->rows()[row];
+    if (r.broken || r.previewLoaded) return;
+    if (previewWorker_->hasPending(r.path)) return;
+    previewWorker_->request(r.path, Settings::instance().tablePreviewMode());
+}
+
+void MainWindow::refreshPreviewsForDir() {
+    Database::instance().invalidatePreviewsForDir(currentDir_);
+    auto mutableRows = model_->rows();
+    for (auto &r : mutableRows) { r.previewLoaded = false; r.preview = QImage(); }
+    model_->setRows(mutableRows);
+    int n = std::min(Settings::instance().previewPrefetchCount(), mutableRows.size());
+    for (int i = 0; i < n; ++i)
+        if (!mutableRows[i].broken) requestPreview(i);
+}
+
+void MainWindow::onSearchClicked() {
+    const QString needle = searchEdit_->text().trimmed().toLower();
+    if (needle.isEmpty()) return;
+    const auto rows = model_->rows();
+    for (int i = 0; i < rows.size(); ++i) {
+        if (rows[i].name.toLower().contains(needle)) {
+            table_->selectRow(i);
+            table_->scrollTo(model_->index(i, 0));
+            return;
+        }
+    }
+    statusBar()->showMessage(tr("No match for \"%1\" in current directory").arg(needle), 4000);
+}
+
+// ---------------- file loading ----------------
+
+int MainWindow::currentRow() const {
+    auto sel = table_->selectionModel()->currentIndex();
+    return sel.isValid() ? sel.row() : -1;
+}
+
+void MainWindow::onRowClicked() {
+    loadCurrentFile();
+}
+
+void MainWindow::loadCurrentFile() {
+    int row = currentRow();
+    if (row < 0 || row >= model_->rows().size()) return;
+    const auto &r = model_->rows()[row];
+    if (r.broken) {   // actions unavailable for broken files (spec 3.3)
+        audio_ = AudioData{};
+        currentPath_.clear();
+        view_->setData(nullptr);
+        return;
+    }
+    QString err;
+    player_.stop();
+    if (!AudioFile::load(r.path, audio_, &err)) {
+        QMessageBox::warning(this, tr("Load failed"),
+                             tr("Cannot open %1\n%2").arg(r.name, err));
+        audio_ = AudioData{};
+        view_->setData(nullptr);
+        return;
+    }
+    currentPath_ = r.path;
+    markers_ = Database::instance().loadMarkers(r.path);
+    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames,
+                      audio_.channels, audio_.sampleRate);
+    view_->setData(&audio_);
+    view_->setMarkers(&markers_);
+    view_->setMode(Settings::instance().playerMode());
+    undoStack_.clear();   // history is per-file/session-scope reset on load
+}
+
+// ---------------- playback ----------------
+
+void MainWindow::playPause() {
+    if (!audio_.valid) return;
+    if (player_.isPlaying()) {
+        player_.pause();
+        playBtn_->setText(tr("Play"));
+        return;
+    }
+    qint64 start = view_->cursorFrame();
+    qint64 end = audio_.totalFrames;
+    if (view_->hasSelection()) {
+        start = view_->selStart();
+        end = view_->selEnd();
+    }
+    player_.play(start, end, loopBtn_->isChecked());
+    playBtn_->setText(tr("Pause"));
+}
+
+void MainWindow::stopPlayback() {
+    player_.stop();
+    playBtn_->setText(tr("Play"));
+    view_->setPlayheadFrame(player_.currentFrame());
+}
+
+void MainWindow::prevFile() {
+    int row = currentRow();
+    if (row > 0) { table_->selectRow(row - 1); table_->scrollTo(model_->index(row - 1, 0)); }
+}
+
+void MainWindow::nextFile() {
+    int row = currentRow();
+    if (row >= 0 && row + 1 < model_->rows().size()) {
+        table_->selectRow(row + 1);
+        table_->scrollTo(model_->index(row + 1, 0));
+    } else {
+        stopPlayback();   // end of list -> stop (spec 2.6)
+    }
+}
+
+// ---------------- editing ----------------
+
+bool MainWindow::editGuarded() {
+    if (!audio_.valid || currentPath_.isEmpty()) {
+        statusBar()->showMessage(tr("No active file"), 3000);
+        return false;
+    }
+    if (!isEditableFormat(currentPath_.toLower())) {
+        QMessageBox::information(this, tr("Not editable"),
+            tr("Editing is available only for WAV/AIFF/CAF PCM files."));
+        return false;
+    }
+    if (!QFileInfo(currentPath_).isWritable()) {
+        QMessageBox::warning(this, tr("Read-only"),
+            tr("You have no write permission for this file."));
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::applyEditToRange(std::function<void()> op, const QString &type,
+                                  qint64 off, qint64 len,
+                                  const QVector<UndoRecord::MarkerDelta> &deltas) {
+    QString err;
+    UndoRecord rec;
+    rec.type = type;
+    rec.filePath = currentPath_;
+    rec.offset = off;
+    rec.length = len;
+    rec.newLength = len;
+    rec.channels = audio_.channels;
+    rec.timestamp = QDateTime::currentDateTime();
+    rec.markerDeltas = deltas;
+    // original samples of the affected range are stored on disk BEFORE editing
+    rec.samplesFile = UndoStack::writeOriginalSamples(
+        Settings::instance().undoDir(), audio_, off, off + len, &err);
+    if (rec.samplesFile.isEmpty()) {
+        QMessageBox::warning(this, tr("Undo error"), err);
+        return;
+    }
+    op();
+    undoStack_.push(rec);
+    undoStack_.enforceLimits(Settings::instance().undoDepth(),
+                             Settings::instance().undoDiskLimitBytes());
+    if (!AudioFile::save(currentPath_, audio_, &err)) {
+        QMessageBox::warning(this, tr("Save failed"), err);
+    } else {
+        persistMarkers();
+        // file changed: invalidate its preview cache entry and re-request preview
+        Database::instance().invalidatePreviewsForDir(currentDir_);
+        auto rows = model_->rows();
+        int row = currentRow();
+        if (row >= 0 && row < rows.size()) {
+            auto mutableRows = rows;
+            mutableRows[row].previewLoaded = false;
+            mutableRows[row].preview = QImage();
+            mutableRows[row].frames = audio_.totalFrames;
+            mutableRows[row].size = QFileInfo(currentPath_).size();
+            mutableRows[row].modified = QFileInfo(currentPath_).lastModified();
+            model_->setRows(mutableRows);
+            requestPreview(row);
+        }
+    }
+}
+
+void MainWindow::doMute() {
+    if (!editGuarded()) return;
+    qint64 off = 0, len = audio_.totalFrames;
+    if (view_->hasSelection()) { off = view_->selStart(); len = view_->selEnd() - off; }
+    const int ch = audio_.channels;
+    applyEditToRange([&] {
+        std::fill(audio_.samples.begin() + off * ch,
+                  audio_.samples.begin() + (off + len) * ch, 0.0f);
+    }, QStringLiteral("mute"), off, len);
+    view_->update();
+}
+
+void MainWindow::doNormalize() {
+    if (!editGuarded()) return;
+    qint64 off = 0, len = audio_.totalFrames;
+    if (view_->hasSelection()) { off = view_->selStart(); len = view_->selEnd() - off; }
+    const double dbfs = normLevel_->value();
+    const float targetPeak = float(std::pow(10.0, dbfs / 20.0));
+    const int ch = audio_.channels;
+    applyEditToRange([&] {
+        float peak = 0.f;
+        for (qint64 i = off * ch; i < (off + len) * ch; ++i)
+            peak = std::max(peak, std::abs(audio_.samples[i]));
+        if (peak <= 0.f) return;
+        const float gain = targetPeak / peak;
+        for (qint64 i = off * ch; i < (off + len) * ch; ++i)
+            audio_.samples[i] *= gain;
+    }, QStringLiteral("normalize"), off, len);
+    view_->update();
+}
+
+void MainWindow::doDeleteSelection() {
+    if (!editGuarded()) return;
+    if (!view_->hasSelection()) {   // unavailable without selection (spec 8.4)
+        statusBar()->showMessage(tr("Delete selection requires an active selection"), 3000);
+        return;
+    }
+    const qint64 off = view_->selStart();
+    const qint64 len = view_->selEnd() - off;
+    const int ch = audio_.channels;
+
+    // capture original samples BEFORE modifying buffer
+    QString err;
+    QString samplesFile = UndoStack::writeOriginalSamples(
+        Settings::instance().undoDir(), audio_, off, off + len, &err);
+    if (samplesFile.isEmpty()) {
+        QMessageBox::warning(this, tr("Undo error"), err);
+        return;
+    }
+
+    // marker bookkeeping (spec 4.6)
+    QVector<UndoRecord::MarkerDelta> deltas;
+    for (auto &m : markers_) {
+        UndoRecord::MarkerDelta d;
+        d.m = m; d.oldPos = m.timeSamples;
+        if (m.timeSamples >= off && m.timeSamples < off + len) {
+            d.deleted = true;
+            d.newPos = m.timeSamples;
+        } else if (m.timeSamples >= off + len) {
+            d.deleted = false;
+            d.newPos = m.timeSamples - len;
+        } else {
+            d.deleted = false;
+            d.newPos = m.timeSamples;
+        }
+        deltas.push_back(d);
+    }
+
+    applyEditToRange([&] {
+        // shift remaining samples left
+        audio_.samples.remove(off * ch, len * ch);
+        audio_.totalFrames -= len;
+        // apply marker changes
+        for (int i = 0; i < markers_.size(); ++i) {
+            const auto &d = deltas[i];
+            if (d.deleted) continue;
+            markers_[i].timeSamples = d.newPos;
+            markers_[i].timeSec = double(d.newPos) / audio_.sampleRate;
+        }
+        // erase deleted markers from vector (iterate reverse)
+        for (int i = markers_.size() - 1; i >= 0; --i)
+            if (deltas[i].deleted) markers_.removeAt(i);
+        view_->clearSelection();
+    }, QStringLiteral("delete"), off, len, deltas);
+
+    view_->update();
+}
+
+// ---------------- undo / redo ----------------
+
+void MainWindow::undo() {
+    const UndoRecord *rec = undoStack_.takeUndo();
+    if (!rec || rec->filePath != currentPath_ || !audio_.valid) {
+        statusBar()->showMessage(tr("Nothing to undo"), 2000);
+        return;
+    }
+    QString err;
+    const int ch = audio_.channels;
+    if (rec->type == QLatin1String("delete")) {
+        // re-insert removed samples
+        QVector<float> orig;
+        if (!UndoStack::readOriginalSamples(rec->samplesFile, orig, &err)) {
+            QMessageBox::warning(this, tr("Undo"), err); return;
+        }
+        audio_.samples.insert(rec->offset * ch, orig.constData(), orig.size());
+        audio_.totalFrames += rec->length;
+        // restore markers: undeleted ones return at old positions, deleted are revived
+        markers_.clear();
+        for (const auto &d : rec->markerDeltas) {
+            Marker m = d.m;
+            m.timeSamples = d.oldPos;
+            m.timeSec = double(d.oldPos) / audio_.sampleRate;
+            markers_.push_back(m);   // spec 4.6: undo restores markers at original positions
+        }
+    } else {
+        QVector<float> orig;
+        if (!UndoStack::readOriginalSamples(rec->samplesFile, orig, &err)) {
+            QMessageBox::warning(this, tr("Undo"), err); return;
+        }
+        std::copy(orig.constData(), orig.constData() + orig.size(),
+                  audio_.samples.begin() + rec->offset * ch);
+    }
+    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
+    if (!AudioFile::save(currentPath_, audio_, &err))
+        QMessageBox::warning(this, tr("Save failed"), err);
+    persistMarkers();
+    view_->update();
+}
+
+void MainWindow::redo() {
+    const UndoRecord *rec = undoStack_.takeRedo();
+    if (!rec || rec->filePath != currentPath_ || !audio_.valid) {
+        statusBar()->showMessage(tr("Nothing to redo"), 2000);
+        return;
+    }
+    // Re-apply operation using stored metadata.
+    QString err;
+    const int ch = audio_.channels;
+    if (rec->type == QLatin1String("mute")) {
+        std::fill(audio_.samples.begin() + rec->offset * ch,
+                  audio_.samples.begin() + (rec->offset + rec->length) * ch, 0.0f);
+    } else if (rec->type == QLatin1String("normalize")) {
+        double dbfs = normLevel_->value();
+        float target = float(std::pow(10.0, dbfs / 20.0));
+        float peak = 0.f;
+        for (qint64 i = rec->offset * ch; i < (rec->offset + rec->length) * ch; ++i)
+            peak = std::max(peak, std::abs(audio_.samples[i]));
+        // after undo the restored original is in place, so re-normalize it
+        if (peak > 0.f) {
+            float gain = target / peak;
+            for (qint64 i = rec->offset * ch; i < (rec->offset + rec->length) * ch; ++i)
+                audio_.samples[i] *= gain;
+        }
+    } else if (rec->type == QLatin1String("delete")) {
+        audio_.samples.remove(rec->offset * ch, rec->length * ch);
+        audio_.totalFrames -= rec->length;
+        markers_.clear();
+        for (const auto &d : rec->markerDeltas) {
+            if (d.deleted) continue;
+            Marker m = d.m;
+            m.timeSamples = d.newPos;
+            m.timeSec = double(d.newPos) / audio_.sampleRate;
+            markers_.push_back(m);
+        }
+    }
+    player_.setBuffer(audio_.samples.constData(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
+    if (!AudioFile::save(currentPath_, audio_, &err))
+        QMessageBox::warning(this, tr("Save failed"), err);
+    persistMarkers();
+    view_->update();
+}
+
+// ---------------- markers ----------------
+
+void MainWindow::persistMarkers() {
+    QFileInfo fi(currentPath_);
+    Database::instance().saveMarkers(currentPath_, fi.size(),
+                                     fi.lastModified().toMSecsSinceEpoch(), markers_);
+}
+
+void MainWindow::createMarkerAt(qint64 frame) {
+    if (!audio_.valid) return;
+    Marker m;
+    m.name = QStringLiteral("M%1").arg(markers_.size() + 1);
+    m.timeSamples = std::clamp(frame, qint64(0), audio_.totalFrames);
+    m.timeSec = double(m.timeSamples) / audio_.sampleRate;
+    markers_.push_back(m);
+    persistMarkers();
+    view_->setActiveMarkerIndex(markers_.size() - 1);
+    view_->update();
+}
+
+void MainWindow::onMarkerClicked(int idx) {
+    if (idx < 0 || idx >= markers_.size()) return;
+    view_->setActiveMarkerIndex(idx);
+    // Double click on a marker opens the editor popup (spec 4.2).
+    static qint64 lastClickMs = 0;
+    static int lastIdx = -1;
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    bool dbl = (idx == lastIdx && now - lastClickMs < QApplication::doubleClickInterval());
+    lastClickMs = now; lastIdx = idx;
+    if (!dbl) return;
+
+    Marker copy = markers_[idx];
+    MarkerDialog dlg(copy, audio_.sampleRate, this);
+    dlg.exec();
+    if (dlg.deleteRequested()) {
+        markers_.remove(idx);
+        view_->setActiveMarkerIndex(-1);
+    } else {
+        markers_[idx] = dlg.marker();
+        markers_[idx].timeSec = double(markers_[idx].timeSamples) / audio_.sampleRate;
+    }
+    persistMarkers();
+    view_->update();
+}
+
+// ---------------- rename ----------------
+
+void MainWindow::renameCurrentFile() {
+    int row = currentRow();
+    if (row < 0 || !QFileInfo(currentPath_).isWritable()) {
+        QMessageBox::warning(this, tr("Rename"), tr("File is not writable or not selected."));
+        return;
+    }
+    bool ok = false;
+    QString newName = QInputDialog::getText(this, tr("Rename file"), tr("New name:"),
+                                            QLineEdit::Normal, QFileInfo(currentPath_).fileName(),
+                                            &ok);
+    if (!ok || newName.isEmpty()) return;
+    QString newPath = QFileInfo(currentPath_).absolutePath() + "/" + newName;
+    if (QFile::rename(currentPath_, newPath)) {
+        Database::instance().renameFilePath(currentPath_, newPath);
+        currentPath_ = newPath;
+        onDirSelected(currentDir_);   // rescan updates paths in the table
+    } else {
+        QMessageBox::warning(this, tr("Rename"), tr("Rename failed."));
+    }
+}
+
+void MainWindow::deleteAllMarkersForFile() {
+    if (currentPath_.isEmpty()) return;
+    markers_.clear();
+    Database::instance().deleteMarkersForFile(currentPath_);
+    view_->update();
+}
+
+// ---------------- settings ----------------
+
+void MainWindow::showSettings() {
+    SettingsDialog dlg(this);
+    connect(&dlg, &SettingsDialog::hotkeysChanged, this, &MainWindow::applyHotkeys);
+    dlg.exec();
+    view_->setMode(Settings::instance().playerMode());
+    tableModeCombo_->setCurrentIndex(Settings::instance().tablePreviewMode() == QLatin1String("spectrogram") ? 1 : 0);
+}

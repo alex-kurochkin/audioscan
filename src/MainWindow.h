@@ -1,0 +1,92 @@
+#pragma once
+#include <QMainWindow>
+#include <QTreeView>
+#include <QTableView>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QComboBox>
+#include <QSlider>
+#include <QDoubleSpinBox>
+#include <QFileSystemModel>
+#include <QToolBar>
+#include <QToolButton>
+#include <functional>
+#include "AudioFile.h"
+#include "FileDialogModel.h"
+#include "AudioView.h"
+#include "AudioPlayer.h"
+#include "UndoStack.h"
+#include "Types.h"
+
+class PreviewWorker;
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
+
+protected:
+    void closeEvent(QCloseEvent *) override;
+
+private slots:
+    void onDirSelected(const QString &path);
+    void onScanFinished(DirScanResult res);
+    void onSearchClicked();
+    void onRowClicked();
+    void loadCurrentFile();
+    void playPause();
+    void stopPlayback();
+    void prevFile();
+    void nextFile();
+    void doMute();
+    void doNormalize();
+    void doDeleteSelection();
+    void deleteAllMarkersForFile();
+    void renameCurrentFile();
+    void undo();
+    void redo();
+    void showSettings();
+    void refreshPreviewsForDir();
+    void createMarkerAt(qint64 frame);
+    void onMarkerClicked(int idx);
+    void applyHotkeys();
+
+private:
+    void buildUi();
+    void requestPreview(int row);
+    bool editGuarded();          // checks editable format + write perms
+    void persistMarkers();
+    void applyEditToRange(std::function<void()> op, const QString &type,
+                          qint64 off, qint64 len,
+                          const QVector<UndoRecord::MarkerDelta> &deltas = {});
+    void rebuildColumnMenu();
+    int currentRow() const;      // sorted/view row -> source row mapping handled internally
+
+    struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+
+    // UI
+    QFileSystemModel *fsModel_ = nullptr;
+    QTreeView *tree_ = nullptr;
+    FileTableModel *model_ = nullptr;
+    QTableView *table_ = nullptr;
+    QLineEdit *searchEdit_ = nullptr;
+    QToolButton *columnsBtn_ = nullptr;
+    QComboBox *tableModeCombo_ = nullptr;
+    AudioView *view_ = nullptr;
+    QPushButton *playBtn_ = nullptr, *loopBtn_ = nullptr;
+    QSlider *volumeSlider_ = nullptr;
+    QComboBox *playerModeCombo_ = nullptr;
+    QDoubleSpinBox *normLevel_ = nullptr;
+    QAction *actRefreshPrev_ = nullptr, *actZoomIn_ = nullptr, *actZoomOut_ = nullptr;
+    QAction *actSettings_ = nullptr;
+
+    // State
+    QString currentDir_;
+    QString currentPath_;
+    AudioData audio_;
+    QVector<Marker> markers_;
+    UndoStack undoStack_;
+    AudioPlayer player_;
+    PreviewWorker *previewWorker_ = nullptr;
+};
