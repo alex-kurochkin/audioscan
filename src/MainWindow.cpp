@@ -375,6 +375,16 @@ void MainWindow::buildUi() {
     auto *nextBtn = new QPushButton(tr(">|"), playerBar);
     loopBtn_ = new QPushButton(tr("Loop"), playerBar);
     loopBtn_->setCheckable(true);
+    // Highlight the button while looping is active.
+    {
+        QPalette pal = loopBtn_->palette();
+        const QColor accent(70, 130, 220);
+        pal.setColor(QPalette::Button, accent);
+        pal.setColor(QPalette::ButtonText, Qt::white);
+        pal.setColor(QPalette::Highlight, accent.darker(120));
+        loopBtn_->setAutoFillBackground(true);
+        loopBtn_->setPalette(pal);
+    }
     volumeSlider_ = new QSlider(Qt::Horizontal, playerBar);
     volumeSlider_->setRange(0, 100);
     volumeSlider_->setValue(int(Settings::instance().volume() * 100));
@@ -405,6 +415,22 @@ void MainWindow::buildUi() {
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
     connect(playBtn_, &QPushButton::clicked, this, &MainWindow::playPause);
     connect(stopBtn, &QPushButton::clicked, this, &MainWindow::stopPlayback);
+    // Loop toggling: works while stopped AND while playing. When playback is
+    // active the range is re-armed immediately so looping takes effect live.
+    connect(loopBtn_, &QPushButton::toggled, this, [this](bool on) {
+        if (player_.isPlaying() || player_.isPaused()) {
+            player_.setLooping(on);
+            return;   // Qt sink loops internally, no restart needed
+        }
+        if (playProc_) {
+            // ffmpeg fallback is running: restart it over the same range with
+            // the new loop flag, resuming from the current playhead position.
+            qint64 cur = view_->playheadFrame();
+            if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
+            startFfmpegFallback(cur, fbEndFrame_, on);
+            if (playProc_) playBtn_->setText(tr("Pause"));
+        }
+    });
     connect(volumeSlider_, &QSlider::valueChanged, this, [this](int v) {
         player_.setVolume(v / 100.0);
         Settings::instance().setVolume(v / 100.0);

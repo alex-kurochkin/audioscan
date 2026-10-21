@@ -37,6 +37,10 @@ public:
     void setVolume(double v) { volume_ = v; }        // internal gain 0..1
     double volume() const { return volume_; }
 
+    // Toggle loop of the current playback range live (while playing).
+    void setLooping(bool on) { looping_ = on; }
+    bool isLooping() const { return looping_; }
+
     qint64 currentFrame() const { return posFrames_; }
     qint64 startFrame() const { return startFrames_; }
 
