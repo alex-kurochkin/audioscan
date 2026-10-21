@@ -53,11 +53,6 @@ public:
         if (!index.isValid()) return Qt::NoItemFlags;
         return QFileSystemModel::flags(index) | Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     }
-protected:
-    bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override {
-        QFileInfo fi = fileInfo(index(sourceRow, 0, sourceParent));
-        return fi.isDir();
-    }
 };
 
 // ---------------- helpers ----------------
