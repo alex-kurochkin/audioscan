@@ -780,24 +780,34 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
         return;
     }
 
-    // Write a temp WAV copy of the current buffer so ffmpeg has a reliable,
-    // seekable input regardless of the original container/codec.
-    playTmpPath_ = QDir(QDir::tempPath())
-                      .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
-    QTemporaryFile tmp(playTmpPath_);
-    tmp.setAutoRemove(false);
-    if (!tmp.open()) { fbStartFrame_ = 0; fbEndFrame_ = 0; return; }
-    playTmpPath_ = tmp.fileName();
-    tmp.close();
+    // For uncompressed formats on disk (WAV/AIFF/CAF) feed ffmpeg the ORIGINAL
+    // file directly: no temp copy, nothing written to disk. This matches what
+    // VLC does. Compressed sources (decoded into memory via ffmpeg) still need
+    // a temp WAV because the in-memory buffer may contain unsaved edits.
+    const bool directFile = !currentPath_.isEmpty() && QFile::exists(currentPath_)
+                            && isEditableFormat(currentPath_.toLower());
+    QString inputPath;
+    if (directFile) {
+        inputPath = currentPath_;
+    } else {
+        playTmpPath_ = QDir(QDir::tempPath())
+                          .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
+        QTemporaryFile tmp(playTmpPath_);
+        tmp.setAutoRemove(false);
+        if (!tmp.open()) { fbStartFrame_ = 0; fbEndFrame_ = 0; return; }
+        playTmpPath_ = tmp.fileName();
+        tmp.close();
 
-    AudioData copy = audio_;
-    QString err;
-    if (!AudioFile::save(playTmpPath_, copy, &err)) {
-        DBG(QStringLiteral("fallback temp WAV save failed: %1").arg(err));
-        QFile::remove(playTmpPath_);
-        playTmpPath_.clear();
-        fbStartFrame_ = 0; fbEndFrame_ = 0;
-        return;
+        AudioData copy = audio_;
+        QString err;
+        if (!AudioFile::save(playTmpPath_, copy, &err)) {
+            DBG(QStringLiteral("fallback temp WAV save failed: %1").arg(err));
+            QFile::remove(playTmpPath_);
+            playTmpPath_.clear();
+            fbStartFrame_ = 0; fbEndFrame_ = 0;
+            return;
+        }
+        inputPath = playTmpPath_;
     }
 
     playProc_ = new QProcess(this);
@@ -830,7 +840,7 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
     args << "-hide_banner" << "-nostdin" << "-loglevel" << "warning" << "-re";
     if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
     args << "-t" << QString::number(durSec, 'f', 3);
-    args << "-i" << playTmpPath_ << "-vn" << "-acodec" << "pcm_s16le"
+    args << "-i" << inputPath << "-vn" << "-acodec" << "pcm_s16le"
          << "-f" << "alsa" << "default";
     DBG(QStringLiteral("spawning: %1 %2").arg(ff, args.join(' ')));
     playProc_->setProgram(ff);
