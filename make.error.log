@@ -1,0 +1,952 @@
+In file included from /home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/moc_FileDialogModel.cpp:9,
+                 from /home/alex/webdev/audioscan/build/audioscout_autogen/mocs_compilation.cpp:4:
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/FileDialogModel.h:18:19: error: field ‘created’ has incomplete type ‘QDateTime’
+   18 |         QDateTime created, modified;
+      |                   ^~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qobject.h:18,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtMultimedia/qaudioformat.h:8,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtMultimedia/QAudioFormat:1,
+                 from /home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/AudioPlayer.h:2,
+                 from /home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/moc_AudioPlayer.cpp:9,
+                 from /home/alex/webdev/audioscan/build/audioscout_autogen/mocs_compilation.cpp:2:
+/usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:1544:1: note: forward declaration of ‘class QDateTime’
+ 1544 | QT_FOR_EACH_STATIC_CORE_CLASS(QT_FORWARD_DECLARE_STATIC_TYPES_ITER)
+      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/FileDialogModel.h:18:28: error: field ‘modified’ has incomplete type ‘QDateTime’
+   18 |         QDateTime created, modified;
+      |                            ^~~~~~~~
+/usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:1544:1: note: forward declaration of ‘class QDateTime’
+ 1544 | QT_FOR_EACH_STATIC_CORE_CLASS(QT_FORWARD_DECLARE_STATIC_TYPES_ITER)
+      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qglobal.h:13,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qtguiglobal.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qimage.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/QImage:1,
+                 from /home/alex/webdev/audioscan/src/Renderer.h:2,
+                 from /home/alex/webdev/audioscan/src/Renderer.cpp:1:
+/usr/include/c++/15/type_traits: In substitution of ‘template<class _Tp, class ... _Args> using std::__is_constructible_impl = std::__bool_constant<__is_constructible(_Tp, _Args ...)> [with _Tp = std::complex<float>; _Args = {std::complex<float>&&}]’:
+/usr/include/c++/15/type_traits:1219:12:   required from ‘struct std::is_move_constructible<std::complex<float> >’
+ 1219 |     struct is_move_constructible
+      |            ^~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/type_traits:188:35:   required by substitution of ‘template<class ... _Bn> std::__detail::__first_t<std::integral_constant<bool, true>, typename std::enable_if<(bool)(_Bn::value), void>::type ...> std::__detail::__and_fn(int) [with _Bn = {std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> >}]’
+  188 |                                       __enable_if_t<bool(_Bn::value)>...>;
+      |                                                               ^~~~~
+/usr/include/c++/15/type_traits:204:42:   required from ‘struct std::__and_<std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> > >’
+  204 |     : decltype(__detail::__and_fn<_Bn...>(0))
+      |                ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/15/type_traits:2449:54:   required by substitution of ‘template<class ... _Cond> using std::_Require = std::__enable_if_t<((bool)std::__and_<_Bn>::value)> [with _Cond = {std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> >}]’
+ 2449 |     using _Require = __enable_if_t<__and_<_Cond...>::value>;
+      |                                                      ^~~~~
+/usr/include/c++/15/bits/move.h:227:5:   required by substitution of ‘template<class _Tp> std::_Require<std::__not_<std::__is_tuple_like<_Tp> >, std::is_move_constructible<_Tp>, std::is_move_assignable<_Tp> > std::swap(_Tp&, _Tp&) [with _Tp = std::complex<float>]’
+  227 |     swap(_Tp& __a, _Tp& __b)
+      |     ^~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29:   required from here
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/type_traits:1151:25: error: invalid use of incomplete type ‘class std::complex<float>’
+ 1151 |       = __bool_constant<__is_constructible(_Tp, _Args...)>;
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /usr/include/c++/15/utility:71,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qglobal.h:15:
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/usr/include/c++/15/type_traits: In instantiation of ‘struct std::is_move_constructible<std::complex<float> >’:
+/usr/include/c++/15/type_traits:188:35:   required by substitution of ‘template<class ... _Bn> std::__detail::__first_t<std::integral_constant<bool, true>, typename std::enable_if<(bool)(_Bn::value), void>::type ...> std::__detail::__and_fn(int) [with _Bn = {std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> >}]’
+  188 |                                       __enable_if_t<bool(_Bn::value)>...>;
+      |                                                               ^~~~~
+/usr/include/c++/15/type_traits:204:42:   required from ‘struct std::__and_<std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> > >’
+  204 |     : decltype(__detail::__and_fn<_Bn...>(0))
+      |                ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/15/type_traits:2449:54:   required by substitution of ‘template<class ... _Cond> using std::_Require = std::__enable_if_t<((bool)std::__and_<_Bn>::value)> [with _Cond = {std::__not_<std::__is_tuple_like<std::complex<float> > >, std::is_move_constructible<std::complex<float> >, std::is_move_assignable<std::complex<float> >}]’
+ 2449 |     using _Require = __enable_if_t<__and_<_Cond...>::value>;
+      |                                                      ^~~~~
+/usr/include/c++/15/bits/move.h:227:5:   required by substitution of ‘template<class _Tp> std::_Require<std::__not_<std::__is_tuple_like<_Tp> >, std::is_move_constructible<_Tp>, std::is_move_assignable<_Tp> > std::swap(_Tp&, _Tp&) [with _Tp = std::complex<float>]’
+  227 |     swap(_Tp& __a, _Tp& __b)
+      |     ^~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29:   required from here
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/type_traits:1222:52: error: static assertion failed: template argument must be a complete class or an unbounded array
+ 1222 |       static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/type_traits:1222:52: note: ‘std::__is_complete_or_unbounded<__type_identity<complex<float> > >((std::__type_identity<std::complex<float> >(), std::__type_identity<std::complex<float> >()))’ evaluates to false
+/home/alex/webdev/audioscan/src/Renderer.cpp: In function ‘void fftInPlace(std::vector<std::complex<float> >&)’:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: error: no matching function for call to ‘swap(__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type&, __gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type&)’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note: there are 28 candidates
+In file included from /usr/include/c++/15/exception:168,
+                 from /usr/include/c++/15/optional:45,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qttypetraits.h:14,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qforeach.h:11,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qglobal.h:55:
+/usr/include/c++/15/bits/exception_ptr.h:229:5: note: candidate 1: ‘void std::__exception_ptr::swap(exception_ptr&, exception_ptr&)’
+  229 |     swap(exception_ptr& __lhs, exception_ptr& __rhs)
+      |     ^~~~
+/usr/include/c++/15/bits/exception_ptr.h:229:25: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘std::__exception_ptr::exception_ptr&’
+  229 |     swap(exception_ptr& __lhs, exception_ptr& __rhs)
+      |          ~~~~~~~~~~~~~~~^~~~~
+In file included from /usr/include/c++/15/bits/stl_pair.h:61:
+/usr/include/c++/15/bits/move.h:227:5: note: candidate 2: ‘template<class _Tp> std::_Require<std::__not_<std::__is_tuple_like<_Tp> >, std::is_move_constructible<_Tp>, std::is_move_assignable<_Tp> > std::swap(_Tp&, _Tp&)’
+  227 |     swap(_Tp& __a, _Tp& __b)
+      |     ^~~~
+/usr/include/c++/15/bits/move.h:227:5: note: substitution of deduced template arguments resulted in errors seen above
+/usr/include/c++/15/bits/move.h:251:5: note: candidate 3: ‘template<class _Tp, long unsigned int _Nm> std::__enable_if_t<((bool)std::__is_swappable<_Tp>::value)> std::swap(_Tp (&)[_Nm], _Tp (&)[_Nm])’
+  251 |     swap(_Tp (&__a)[_Nm], _Tp (&__b)[_Nm])
+      |     ^~~~
+/usr/include/c++/15/bits/move.h:251:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   mismatched types ‘_Tp [_Nm]’ and ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’}
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:1121:5: note: candidate 4: ‘template<class _T1, class _T2> typename std::enable_if<std::__and_<std::__is_swappable<_Tp>, std::__is_swappable<_T2> >::value>::type std::swap(pair<_T1, _T2>&, pair<_T1, _T2>&)’
+ 1121 |     swap(pair<_T1, _T2>& __x, pair<_T1, _T2>& __y)
+      |     ^~~~
+/usr/include/c++/15/bits/stl_pair.h:1121:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::pair<_T1, _T2>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:1138:5: note: candidate 5: ‘template<class _T1, class _T2> typename std::enable_if<(! std::__and_<std::__is_swappable<_Tp>, std::__is_swappable<_T2> >::value)>::type std::swap(pair<_T1, _T2>&, pair<_T1, _T2>&)’ (deleted)
+ 1138 |     swap(pair<_T1, _T2>&, pair<_T1, _T2>&) = delete;
+      |     ^~~~
+/usr/include/c++/15/bits/stl_pair.h:1138:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::pair<_T1, _T2>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/optional:1702:5: note: candidate 6: ‘template<class _Tp> std::enable_if_t<((bool)(is_move_constructible_v<_Tp> && is_swappable_v<_Tp>))> std::swap(optional<_Tp>&, optional<_Tp>&)’
+ 1702 |     swap(optional<_Tp>& __lhs, optional<_Tp>& __rhs)
+      |     ^~~~
+/usr/include/c++/15/optional:1702:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::optional<_Tp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/optional:1708:5: note: candidate 7: ‘template<class _Tp> std::enable_if_t<((bool)(!(is_move_constructible_v<_Tp> && is_swappable_v<_Tp>)))> std::swap(optional<_Tp>&, optional<_Tp>&)’ (deleted)
+ 1708 |     swap(optional<_Tp>&, optional<_Tp>&) = delete;
+      |     ^~~~
+/usr/include/c++/15/optional:1708:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::optional<_Tp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qttypetraits.h:15:
+/usr/include/c++/15/tuple:2833:5: note: candidate 8: ‘template<class ... _Elements> typename std::enable_if<std::__and_<std::__is_swappable<_Elements>...>::value>::type std::swap(tuple<_Elements ...>&, tuple<_Elements ...>&)’
+ 2833 |     swap(tuple<_Elements...>& __x, tuple<_Elements...>& __y)
+      |     ^~~~
+/usr/include/c++/15/tuple:2833:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::tuple<_Elements ...>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/tuple:2851:5: note: candidate 9: ‘template<class ... _Elements> typename std::enable_if<(! std::__and_<std::__is_swappable<_Elements>...>::value)>::type std::swap(tuple<_Elements ...>&, tuple<_Elements ...>&)’ (deleted)
+ 2851 |     swap(tuple<_Elements...>&, tuple<_Elements...>&) = delete;
+      |     ^~~~
+/usr/include/c++/15/tuple:2851:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::tuple<_Elements ...>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qttypetraits.h:18:
+/usr/include/c++/15/variant:1386:5: note: candidate 10: ‘template<class ... _Types> std::enable_if_t<((bool)((is_move_constructible_v<_Types> && ...) && (is_swappable_v<_Types> && ...)))> std::swap(variant<_Types ...>&, variant<_Types ...>&)’
+ 1386 |     swap(variant<_Types...>& __lhs, variant<_Types...>& __rhs)
+      |     ^~~~
+/usr/include/c++/15/variant:1386:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::variant<_Types ...>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/variant:1393:5: note: candidate 11: ‘template<class ... _Types> std::enable_if_t<((bool)(!((is_move_constructible_v<_Types> && ...) && (is_swappable_v<_Types> && ...))))> std::swap(variant<_Types ...>&, variant<_Types ...>&)’ (deleted)
+ 1393 |     swap(variant<_Types...>&, variant<_Types...>&) = delete;
+      |     ^~~~
+/usr/include/c++/15/variant:1393:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::variant<_Types ...>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/functional:61,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qcomparehelpers.h:28,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qcompare.h:639,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qnamespace.h:13,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qcolor.h:9,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qimage.h:8:
+/usr/include/c++/15/bits/std_function.h:786:5: note: candidate 12: ‘template<class _Res, class ... _Args> void std::swap(function<_Res(_ArgTypes ...)>&, function<_Res(_ArgTypes ...)>&)’
+  786 |     swap(function<_Res(_Args...)>& __x, function<_Res(_Args...)>& __y) noexcept
+      |     ^~~~
+/usr/include/c++/15/bits/std_function.h:786:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::function<_Res(_ArgTypes ...)>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/unordered_map:43,
+                 from /usr/include/c++/15/functional:65:
+/usr/include/c++/15/bits/unordered_map.h:2362:5: note: candidate 13: ‘template<class _Key, class _Tp, class _Hash, class _Pred, class _Alloc> void std::swap(unordered_map<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>&, unordered_map<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>&)’
+ 2362 |     swap(unordered_map<_Key, _Tp, _Hash, _Pred, _Alloc>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/unordered_map.h:2362:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::unordered_map<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/unordered_map.h:2369:5: note: candidate 14: ‘template<class _Key, class _Tp, class _Hash, class _Pred, class _Alloc> void std::swap(unordered_multimap<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>&, unordered_multimap<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>&)’
+ 2369 |     swap(unordered_multimap<_Key, _Tp, _Hash, _Pred, _Alloc>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/unordered_map.h:2369:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::unordered_multimap<_Key1, _Tp1, _Hash1, _Pred1, _Alloc1>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/vector:68,
+                 from /usr/include/c++/15/functional:66:
+/usr/include/c++/15/bits/stl_vector.h:2410:5: note: candidate 15: ‘template<class _Tp, class _Alloc> void std::swap(vector<_Tp, _Alloc>&, vector<_Tp, _Alloc>&)’
+ 2410 |     swap(vector<_Tp, _Alloc>& __x, vector<_Tp, _Alloc>& __y)
+      |     ^~~~
+/usr/include/c++/15/bits/stl_vector.h:2410:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::vector<_Tp, _Alloc>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/functional:67:
+/usr/include/c++/15/array:379:5: note: candidate 16: ‘template<class _Tp, long unsigned int _Nm> std::__enable_if_t<((bool)typename std::__array_traits<_Tp, _Nm>::_Is_swappable::value)> std::swap(array<_Tp, _Nm>&, array<_Tp, _Nm>&)’
+  379 |     swap(array<_Tp, _Nm>& __one, array<_Tp, _Nm>& __two)
+      |     ^~~~
+/usr/include/c++/15/array:379:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::array<_Tp, _Nm>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/array:386:5: note: candidate 17: ‘template<class _Tp, long unsigned int _Nm> std::__enable_if_t<((bool)(! typename std::__array_traits<_Tp, _Nm>::_Is_swappable::value))> std::swap(array<_Tp, _Nm>&, array<_Tp, _Nm>&)’ (deleted)
+  386 |     swap(array<_Tp, _Nm>&, array<_Tp, _Nm>&) = delete;
+      |     ^~~~
+/usr/include/c++/15/array:386:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::array<_Tp, _Nm>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/string:56,
+                 from /usr/include/c++/15/bits/locale_classes.h:42,
+                 from /usr/include/c++/15/bits/ios_base.h:43,
+                 from /usr/include/c++/15/streambuf:45,
+                 from /usr/include/c++/15/bits/streambuf_iterator.h:37,
+                 from /usr/include/c++/15/iterator:68,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qcontainertools_impl.h:20,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qarraydataops.h:9,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qarraydatapointer.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qlist.h:8,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qstringlist.h:5,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qcolor.h:10:
+/usr/include/c++/15/bits/basic_string.h:4329:5: note: candidate 18: ‘template<class _CharT, class _Traits, class _Alloc> void std::swap(__cxx11::basic_string<_CharT, _Traits, _Alloc>&, __cxx11::basic_string<_CharT, _Traits, _Alloc>&)’
+ 4329 |     swap(basic_string<_CharT, _Traits, _Alloc>& __lhs,
+      |     ^~~~
+/usr/include/c++/15/bits/basic_string.h:4329:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::__cxx11::basic_string<_CharT, _Traits, _Alloc>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/memory:80,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qcontainertools_impl.h:21:
+/usr/include/c++/15/bits/unique_ptr.h:829:5: note: candidate 19: ‘template<class _Tp, class _Dp> typename std::enable_if<std::__is_swappable<_T2>::value>::type std::swap(unique_ptr<_Tp, _Dp>&, unique_ptr<_Tp, _Dp>&)’
+  829 |     swap(unique_ptr<_Tp, _Dp>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/unique_ptr.h:829:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::unique_ptr<_Tp, _Dp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/unique_ptr.h:836:5: note: candidate 20: ‘template<class _Tp, class _Dp> typename std::enable_if<(! std::__is_swappable<_T2>::value)>::type std::swap(unique_ptr<_Tp, _Dp>&, unique_ptr<_Tp, _Dp>&)’ (deleted)
+  836 |     swap(unique_ptr<_Tp, _Dp>&,
+      |     ^~~~
+/usr/include/c++/15/bits/unique_ptr.h:836:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::unique_ptr<_Tp, _Dp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/bits/shared_ptr.h:53,
+                 from /usr/include/c++/15/memory:82:
+/usr/include/c++/15/bits/shared_ptr_base.h:1927:5: note: candidate 21: ‘template<class _Tp, __gnu_cxx::_Lock_policy _Lp> void std::swap(__shared_ptr<_Tp, _Lp>&, __shared_ptr<_Tp, _Lp>&)’
+ 1927 |     swap(__shared_ptr<_Tp, _Lp>& __a, __shared_ptr<_Tp, _Lp>& __b) noexcept
+      |     ^~~~
+/usr/include/c++/15/bits/shared_ptr_base.h:1927:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::__shared_ptr<_Tp, _Lp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/shared_ptr_base.h:2136:5: note: candidate 22: ‘template<class _Tp, __gnu_cxx::_Lock_policy _Lp> void std::swap(__weak_ptr<_Tp, _Lp>&, __weak_ptr<_Tp, _Lp>&)’
+ 2136 |     swap(__weak_ptr<_Tp, _Lp>& __a, __weak_ptr<_Tp, _Lp>& __b) noexcept
+      |     ^~~~
+/usr/include/c++/15/bits/shared_ptr_base.h:2136:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::__weak_ptr<_Tp, _Lp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/shared_ptr.h:691:5: note: candidate 23: ‘template<class _Tp> void std::swap(shared_ptr<_Tp>&, shared_ptr<_Tp>&)’
+  691 |     swap(shared_ptr<_Tp>& __a, shared_ptr<_Tp>& __b) noexcept
+      |     ^~~~
+/usr/include/c++/15/bits/shared_ptr.h:691:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::shared_ptr<_Tp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/usr/include/c++/15/bits/shared_ptr.h:887:5: note: candidate 24: ‘template<class _Tp> void std::swap(weak_ptr<_Tp>&, weak_ptr<_Tp>&)’
+  887 |     swap(weak_ptr<_Tp>& __a, weak_ptr<_Tp>& __b) noexcept
+      |     ^~~~
+/usr/include/c++/15/bits/shared_ptr.h:887:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::weak_ptr<_Tp>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/list:67,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:27,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qtextoption.h:10,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qpainter.h:14,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/QPainter:1,
+                 from /home/alex/webdev/audioscan/src/Renderer.cpp:2:
+/usr/include/c++/15/bits/stl_list.h:2713:5: note: candidate 25: ‘template<class _Tp, class _Alloc> void std::swap(__cxx11::list<_Tp, _Alloc>&, __cxx11::list<_Tp, _Alloc>&)’
+ 2713 |     swap(list<_Tp, _Alloc>& __x, list<_Tp, _Alloc>& __y)
+      |     ^~~~
+/usr/include/c++/15/bits/stl_list.h:2713:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::__cxx11::list<_Tp, _Alloc>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/map:64,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:28:
+/usr/include/c++/15/bits/stl_tree.h:2327:5: note: candidate 26: ‘template<class _Key, class _Val, class _KeyOfValue, class _Compare, class _Alloc> void std::swap(_Rb_tree<_Key, _Val, _KeyOfValue, _Compare, _Alloc>&, _Rb_tree<_Key, _Val, _KeyOfValue, _Compare, _Alloc>&)’
+ 2327 |     swap(_Rb_tree<_Key, _Val, _KeyOfValue, _Compare, _Alloc>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/stl_tree.h:2327:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::_Rb_tree<_Key, _Val, _KeyOfValue, _Compare, _Alloc>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/map:65:
+/usr/include/c++/15/bits/stl_map.h:1645:5: note: candidate 27: ‘template<class _Key, class _Tp, class _Compare, class _Alloc> void std::swap(map<_Key, _Tp, _Compare, _Allocator>&, map<_Key, _Tp, _Compare, _Allocator>&)’
+ 1645 |     swap(map<_Key, _Tp, _Compare, _Alloc>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/stl_map.h:1645:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::map<_Key, _Tp, _Compare, _Allocator>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+In file included from /usr/include/c++/15/map:66:
+/usr/include/c++/15/bits/stl_multimap.h:1268:5: note: candidate 28: ‘template<class _Key, class _Tp, class _Compare, class _Alloc> void std::swap(multimap<_Key, _Tp, _Compare, _Allocator>&, multimap<_Key, _Tp, _Compare, _Allocator>&)’
+ 1268 |     swap(multimap<_Key, _Tp, _Compare, _Alloc>& __x,
+      |     ^~~~
+/usr/include/c++/15/bits/stl_multimap.h:1268:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:29: note:   ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} is not derived from ‘std::multimap<_Key, _Tp, _Compare, _Allocator>’
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                    ~~~~~~~~~^~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:17:39: error: variable ‘std::complex<float> wlen’ has initializer but incomplete type
+   17 |         std::complex<float> wlen(std::cos(ang), std::sin(ang));
+      |                                       ^~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:3:1: note: ‘std::complex’ is defined in header ‘<complex>’; this is probably fixable by adding ‘#include <complex>’
+    2 | #include <QPainter>
+  +++ |+#include <complex>
+    3 | #include <cmath>
+/home/alex/webdev/audioscan/src/Renderer.cpp:19:34: error: variable ‘std::complex<float> w’ has initializer but incomplete type
+   19 |             std::complex<float> w(1.0f, 0.0f);
+      |                                  ^
+/home/alex/webdev/audioscan/src/Renderer.cpp:19:34: note: ‘std::complex’ is defined in header ‘<complex>’; this is probably fixable by adding ‘#include <complex>’
+/home/alex/webdev/audioscan/src/Renderer.cpp:21:22: error: deduced type ‘std::complex<float>’ for ‘u’ is incomplete
+   21 |                 auto u = a[i + k];
+      |                      ^
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp: In function ‘void Renderer::fftMagnitude(const float*, int, QVector<float>&)’:
+/home/alex/webdev/audioscan/src/Renderer.cpp:36:38: error: invalid use of incomplete type ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘class std::complex<float>’}
+   36 |         buf[i] = {window[i] * w, 0.0f};
+      |                                      ^
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘class std::complex<float>’}
+  105 |     class complex;
+      |           ^~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:41:29: error: no matching function for call to ‘abs(__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type&)’
+   41 |         magOut[i] = std::abs(buf[i]);
+      |                     ~~~~~~~~^~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:41:29: note: there are 8 candidates
+In file included from /usr/include/c++/15/cstdlib:83,
+                 from /usr/include/c++/15/bits/stl_algo.h:71,
+                 from /usr/include/c++/15/algorithm:63,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qflags.h:10,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qglobal.h:49:
+/usr/include/stdlib.h:980:12: note: candidate 1: ‘int abs(int)’
+  980 | extern int abs (int __x) __THROW __attribute__ ((__const__)) __wur;
+      |            ^~~
+/usr/include/stdlib.h:980:21: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘int’
+  980 | extern int abs (int __x) __THROW __attribute__ ((__const__)) __wur;
+      |                 ~~~~^~~
+In file included from /usr/include/c++/15/cstdlib:87:
+/usr/include/c++/15/bits/std_abs.h:62:3: note: candidate 2: ‘long int std::abs(long int)’
+   62 |   abs(long __i) { return __builtin_labs(__i); }
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:62:12: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘long int’
+   62 |   abs(long __i) { return __builtin_labs(__i); }
+      |       ~~~~~^~~
+/usr/include/c++/15/bits/std_abs.h:67:3: note: candidate 3: ‘long long int std::abs(long long int)’
+   67 |   abs(long long __x) { return __builtin_llabs (__x); }
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:67:17: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘long long int’
+   67 |   abs(long long __x) { return __builtin_llabs (__x); }
+      |       ~~~~~~~~~~^~~
+/usr/include/c++/15/bits/std_abs.h:77:3: note: candidate 4: ‘constexpr double std::abs(double)’
+   77 |   abs(double __x)
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:77:14: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘double’
+   77 |   abs(double __x)
+      |       ~~~~~~~^~~
+/usr/include/c++/15/bits/std_abs.h:81:3: note: candidate 5: ‘constexpr float std::abs(float)’
+   81 |   abs(float __x)
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:81:13: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘float’
+   81 |   abs(float __x)
+      |       ~~~~~~^~~
+/usr/include/c++/15/bits/std_abs.h:85:3: note: candidate 6: ‘constexpr long double std::abs(long double)’
+   85 |   abs(long double __x)
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:85:19: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘long double’
+   85 |   abs(long double __x)
+      |       ~~~~~~~~~~~~^~~
+/usr/include/c++/15/bits/std_abs.h:91:3: note: candidate 7: ‘constexpr __int128 std::abs(__int128)’
+   91 |   abs(__GLIBCXX_TYPE_INT_N_0 __x) { return __x >= 0 ? __x : -__x; }
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:91:30: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘__int128’
+   91 |   abs(__GLIBCXX_TYPE_INT_N_0 __x) { return __x >= 0 ? __x : -__x; }
+      |                              ^
+/usr/include/c++/15/bits/std_abs.h:143:3: note: candidate 8: ‘constexpr __float128 std::abs(__float128)’
+  143 |   abs(__float128 __x)
+      |   ^~~
+/usr/include/c++/15/bits/std_abs.h:143:18: note: no known conversion for argument 1 from ‘__gnu_cxx::__alloc_traits<std::allocator<std::complex<float> >, std::complex<float> >::value_type’ {aka ‘std::complex<float>’} to ‘__float128’
+  143 |   abs(__float128 __x)
+      |       ~~~~~~~~~~~^~~
+/home/alex/webdev/audioscan/src/Renderer.cpp: In function ‘QImage Renderer::waveform(const AudioData&, int, int, bool)’:
+/home/alex/webdev/audioscan/src/Renderer.cpp:70:42: error: ‘class QPainter’ has no member named ‘setPixel’; did you mean ‘setPen’?
+   70 |         for (int y = hi; y <= lo; ++y) p.setPixel(x, y, wave.rgb());
+      |                                          ^~~~~~~~
+      |                                          setPen
+/usr/include/c++/15/bits/stl_vector.h: In instantiation of ‘std::vector<_Tp, _Alloc>::size_type std::vector<_Tp, _Alloc>::size() const [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int]’:
+/home/alex/webdev/audioscan/src/Renderer.cpp:8:22:   required from here
+    8 |     size_t n = a.size();
+      |                ~~~~~~^~
+/usr/include/c++/15/bits/stl_vector.h:1119:51: error: invalid use of incomplete type ‘class std::complex<float>’
+ 1119 |         ptrdiff_t __dif = this->_M_impl._M_finish - this->_M_impl._M_start;
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/usr/include/c++/15/bits/stl_vector.h: In instantiation of ‘std::vector<_Tp, _Alloc>::reference std::vector<_Tp, _Alloc>::operator[](size_type) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; reference = std::complex<float>&; size_type = long unsigned int]’:
+/home/alex/webdev/audioscan/src/Renderer.cpp:13:33:   required from here
+   13 |         if (i < j) std::swap(a[i], a[j]);
+      |                                 ^
+/usr/include/c++/15/bits/stl_vector.h:1264:41: error: invalid use of incomplete type ‘class std::complex<float>’
+ 1264 |         return *(this->_M_impl._M_start + __n);
+      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+In file included from /home/alex/webdev/audioscan/src/FileDialogModel.cpp:1:
+/home/alex/webdev/audioscan/src/FileDialogModel.h:18:19: error: field ‘created’ has incomplete type ‘QDateTime’
+   18 |         QDateTime created, modified;
+      |                   ^~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qobject.h:18,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qabstractitemmodel.h:12,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/QAbstractTableModel:1,
+                 from /home/alex/webdev/audioscan/src/FileDialogModel.h:2:
+/usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:1544:1: note: forward declaration of ‘class QDateTime’
+ 1544 | QT_FOR_EACH_STATIC_CORE_CLASS(QT_FORWARD_DECLARE_STATIC_TYPES_ITER)
+      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/FileDialogModel.h:18:28: error: field ‘modified’ has incomplete type ‘QDateTime’
+   18 |         QDateTime created, modified;
+      |                            ^~~~~~~~
+/usr/include/x86_64-linux-gnu/qt6/QtCore/qmetatype.h:1544:1: note: forward declaration of ‘class QDateTime’
+ 1544 | QT_FOR_EACH_STATIC_CORE_CLASS(QT_FORWARD_DECLARE_STATIC_TYPES_ITER)
+      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h: In instantiation of ‘std::_Vector_base<_Tp, _Alloc>::~_Vector_base() [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >]’:
+/usr/include/c++/15/bits/stl_vector.h:587:47:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  587 |       : _Base(_S_check_init_len(__n, __a), __a)
+      |                                               ^
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/stl_vector.h:376:49: error: invalid use of incomplete type ‘class std::complex<float>’
+  376 |                       _M_impl._M_end_of_storage - _M_impl._M_start);
+      |                       ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/home/alex/webdev/audioscan/src/FileDialogModel.cpp:11:1: error: ‘FileDialogModel’ does not name a type; did you mean ‘FileTableModel’?
+   11 | FileDialogModel::FileDialogModel(QObject *parent) : QAbstractTableModel(parent) {
+      | ^~~~~~~~~~~~~~~
+      | FileTableModel
+/home/alex/webdev/audioscan/src/FileDialogModel.cpp: In member function ‘virtual QVariant FileTableModel::data(const QModelIndex&, int) const’:
+/home/alex/webdev/audioscan/src/FileDialogModel.cpp:81:34: error: passing ‘const FileTableModel’ as ‘this’ argument discards qualifiers [-fpermissive]
+   81 |             emit previewRequested(index.row());
+      |                  ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/FileDialogModel.h:50:10: note:   in call to ‘void FileTableModel::previewRequested(int)’
+   50 |     void previewRequested(int row);   // lazy loading request
+      |          ^~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h: In instantiation of ‘static std::vector<_Tp, _Alloc>::size_type std::vector<_Tp, _Alloc>::_S_max_size(const _Tp_alloc_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; _Tp_alloc_type = std::vector<std::complex<float> >::_Tp_alloc_type]’:
+/usr/include/c++/15/bits/stl_vector.h:2210:23:   required from ‘static std::vector<_Tp, _Alloc>::size_type std::vector<_Tp, _Alloc>::_S_check_init_len(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+ 2210 |         if (__n > _S_max_size(_Tp_alloc_type(__a)))
+      |                   ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:587:32:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  587 |       : _Base(_S_check_init_len(__n, __a), __a)
+      |               ~~~~~~~~~~~~~~~~~^~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/stl_vector.h:2223:61: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+ 2223 |           = __gnu_cxx::__numeric_traits<ptrdiff_t>::__max / sizeof(_Tp);
+      |                                                             ^~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h: In instantiation of ‘void std::_Vector_base<_Tp, _Alloc>::_M_create_storage(std::size_t) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; std::size_t = long unsigned int]’:
+/usr/include/c++/15/bits/stl_vector.h:341:9:   required from ‘std::_Vector_base<_Tp, _Alloc>::_Vector_base(std::size_t, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; std::size_t = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  341 |       { _M_create_storage(__n); }
+      |         ^~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:587:47:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  587 |       : _Base(_S_check_init_len(__n, __a), __a)
+      |                                               ^
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/stl_vector.h:407:66: error: invalid use of incomplete type ‘class std::complex<float>’
+  407 |         this->_M_impl._M_end_of_storage = this->_M_impl._M_start + __n;
+      |                                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/usr/include/c++/15/type_traits: In instantiation of ‘struct std::is_trivially_destructible<std::complex<float> >’:
+/usr/include/c++/15/bits/stl_construct.h:224:62:   required from ‘void std::_Destroy(_ForwardIterator, _ForwardIterator) [with _ForwardIterator = complex<float>*]’
+  224 |       if constexpr (!is_trivially_destructible<_Value_type>::value)
+      |                                                              ^~~~~
+/usr/include/c++/15/bits/alloc_traits.h:1045:20:   required from ‘void std::_Destroy(_ForwardIterator, _ForwardIterator, allocator<_T2>&) [with _ForwardIterator = complex<float>*; _Tp = complex<float>]’
+ 1045 |       std::_Destroy(__first, __last);
+      |       ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:802:15:   required from ‘std::vector<_Tp, _Alloc>::~vector() [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >]’
+  802 |         std::_Destroy(this->_M_impl._M_start, this->_M_impl._M_finish,
+      |         ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  803 |                       _M_get_Tp_allocator());
+      |                       ~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/type_traits:1458:37: error: invalid use of incomplete type ‘class std::complex<float>’
+ 1458 |                     __bool_constant<__has_trivial_destructor(_Tp)>>::type
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘class std::complex<float>’
+  105 |     class complex;
+      |           ^~~~~~~
+/usr/include/c++/15/type_traits:1460:52: error: static assertion failed: template argument must be a complete class or an unbounded array
+ 1460 |       static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/type_traits:1460:52: note: ‘std::__is_complete_or_unbounded<__type_identity<complex<float> > >((std::__type_identity<std::complex<float> >(), std::__type_identity<std::complex<float> >()))’ evaluates to false
+In file included from /usr/include/c++/15/bits/stl_tempbuf.h:61,
+                 from /usr/include/c++/15/bits/stl_algo.h:69:
+/usr/include/c++/15/bits/stl_construct.h: In instantiation of ‘void std::_Destroy(_ForwardIterator, _ForwardIterator) [with _ForwardIterator = complex<float>*]’:
+/usr/include/c++/15/bits/alloc_traits.h:1045:20:   required from ‘void std::_Destroy(_ForwardIterator, _ForwardIterator, allocator<_T2>&) [with _ForwardIterator = complex<float>*; _Tp = complex<float>]’
+ 1045 |       std::_Destroy(__first, __last);
+      |       ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:802:15:   required from ‘std::vector<_Tp, _Alloc>::~vector() [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >]’
+  802 |         std::_Destroy(this->_M_impl._M_start, this->_M_impl._M_finish,
+      |         ~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  803 |                       _M_get_Tp_allocator());
+      |                       ~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/stl_construct.h:224:62: error: ‘value’ is not a member of ‘std::is_trivially_destructible<std::complex<float> >’
+  224 |       if constexpr (!is_trivially_destructible<_Value_type>::value)
+      |                                                              ^~~~~
+/usr/include/c++/15/bits/stl_construct.h:225:37: error: cannot increment a pointer to incomplete type ‘std::complex<float>’
+  225 |         for (; __first != __last; ++__first)
+      |                                     ^~~~~~~
+/usr/include/c++/15/type_traits: In instantiation of ‘struct std::is_copy_assignable<std::complex<float> >’:
+/usr/include/c++/15/type_traits:188:35:   required by substitution of ‘template<class ... _Bn> std::__detail::__first_t<std::integral_constant<bool, true>, typename std::enable_if<(bool)(_Bn::value), void>::type ...> std::__detail::__and_fn(int) [with _Bn = {std::is_integral<long unsigned int>, std::is_copy_assignable<std::complex<float> >}]’
+  188 |                                       __enable_if_t<bool(_Bn::value)>...>;
+      |                                                               ^~~~~
+/usr/include/c++/15/type_traits:204:42:   required from ‘struct std::__and_<std::is_integral<long unsigned int>, std::is_copy_assignable<std::complex<float> > >’
+  204 |     : decltype(__detail::__and_fn<_Bn...>(0))
+      |                ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~
+/usr/include/c++/15/bits/stl_uninitialized.h:943:64:   required from ‘_ForwardIterator std::__uninitialized_default_n(_ForwardIterator, _Size) [with _ForwardIterator = complex<float>*; _Size = long unsigned int]’
+  943 |         = __and_<is_integral<_Size>, is_copy_assignable<_ValueType>>::value;
+      |                                                                       ^~~~~
+/usr/include/c++/15/bits/stl_uninitialized.h:1002:44:   required from ‘_ForwardIterator std::__uninitialized_default_n_a(_ForwardIterator, _Size, allocator<_Tp2>&) [with _ForwardIterator = complex<float>*; _Size = long unsigned int; _Tp = complex<float>]’
+ 1002 |     { return std::__uninitialized_default_n(__first, __n); }
+      |              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:2011:36:   required from ‘void std::vector<_Tp, _Alloc>::_M_default_initialize(size_type) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int]’
+ 2011 |           std::__uninitialized_default_n_a(this->_M_impl._M_start, __n,
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 2012 |                                            _M_get_Tp_allocator());
+      |                                            ~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:588:9:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  588 |       { _M_default_initialize(__n); }
+      |         ^~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/type_traits:1288:52: error: static assertion failed: template argument must be a complete class or an unbounded array
+ 1288 |       static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
+      |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/type_traits:1288:52: note: ‘std::__is_complete_or_unbounded<__type_identity<complex<float> > >((std::__type_identity<std::complex<float> >(), std::__type_identity<std::complex<float> >()))’ evaluates to false
+In file included from /usr/include/c++/15/vector:67:
+/usr/include/c++/15/bits/stl_uninitialized.h: In instantiation of ‘_ForwardIterator std::__uninitialized_default_n(_ForwardIterator, _Size) [with _ForwardIterator = complex<float>*; _Size = long unsigned int]’:
+/usr/include/c++/15/bits/stl_uninitialized.h:1002:44:   required from ‘_ForwardIterator std::__uninitialized_default_n_a(_ForwardIterator, _Size, allocator<_Tp2>&) [with _ForwardIterator = complex<float>*; _Size = long unsigned int; _Tp = complex<float>]’
+ 1002 |     { return std::__uninitialized_default_n(__first, __n); }
+      |              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:2011:36:   required from ‘void std::vector<_Tp, _Alloc>::_M_default_initialize(size_type) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int]’
+ 2011 |           std::__uninitialized_default_n_a(this->_M_impl._M_start, __n,
+      |           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 2012 |                                            _M_get_Tp_allocator());
+      |                                            ~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:588:9:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  588 |       { _M_default_initialize(__n); }
+      |         ^~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/stl_uninitialized.h:945:42: error: invalid use of incomplete type ‘std::iterator_traits<std::complex<float>*>::value_type’ {aka ‘class std::complex<float>’}
+  945 |       return __uninitialized_default_n_1<__is_trivial(_ValueType)
+      |                                          ^~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_pair.h:105:11: note: declaration of ‘std::iterator_traits<std::complex<float>*>::value_type’ {aka ‘class std::complex<float>’}
+  105 |     class complex;
+      |           ^~~~~~~
+In file included from /usr/include/x86_64-linux-gnu/c++/15/bits/c++allocator.h:33,
+                 from /usr/include/c++/15/bits/allocator.h:46,
+                 from /usr/include/c++/15/bits/alloc_traits.h:39,
+                 from /usr/include/c++/15/ext/alloc_traits.h:36,
+                 from /usr/include/c++/15/bits/hashtable_policy.h:39,
+                 from /usr/include/c++/15/bits/hashtable.h:37,
+                 from /usr/include/c++/15/bits/unordered_map.h:33:
+/usr/include/c++/15/bits/new_allocator.h: In instantiation of ‘void std::__new_allocator<_Tp>::deallocate(_Tp*, size_type) [with _Tp = std::complex<float>; size_type = long unsigned int]’:
+/usr/include/c++/15/bits/alloc_traits.h:649:23:   required from ‘static void std::allocator_traits<std::allocator<_Tp1> >::deallocate(allocator_type&, pointer, size_type) [with _Tp = std::complex<float>; allocator_type = std::allocator<std::complex<float> >; pointer = std::complex<float>*; size_type = long unsigned int]’
+  649 |       { __a.deallocate(__p, __n); }
+      |         ~~~~~~~~~~~~~~^~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:396:19:   required from ‘void std::_Vector_base<_Tp, _Alloc>::_M_deallocate(pointer, std::size_t) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; pointer = std::complex<float>*; std::size_t = long unsigned int]’
+  396 |           _Tr::deallocate(_M_impl, __p, __n);
+      |           ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:375:2:   required from ‘std::_Vector_base<_Tp, _Alloc>::~_Vector_base() [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >]’
+  375 |         _M_deallocate(_M_impl._M_start,
+      |         ^~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:587:47:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  587 |       : _Base(_S_check_init_len(__n, __a), __a)
+      |                                               ^
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/new_allocator.h:165:13: error: invalid application of ‘__alignof__’ to incomplete type ‘std::complex<float>’
+  165 |         if (alignof(_Tp) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+      |             ^~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:167:38: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  167 |             _GLIBCXX_OPERATOR_DELETE(_GLIBCXX_SIZED_DEALLOC(__p, __n),
+      |                                      ^~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:168:55: error: invalid application of ‘__alignof__’ to incomplete type ‘std::complex<float>’
+  168 |                                      std::align_val_t(alignof(_Tp)));
+      |                                                       ^~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:172:34: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  172 |         _GLIBCXX_OPERATOR_DELETE(_GLIBCXX_SIZED_DEALLOC(__p, __n));
+      |                                  ^~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h: In instantiation of ‘_Tp* std::__new_allocator<_Tp>::allocate(size_type, const void*) [with _Tp = std::complex<float>; size_type = long unsigned int]’:
+/usr/include/c++/15/bits/alloc_traits.h:614:28:   required from ‘static _Tp* std::allocator_traits<std::allocator<_Tp1> >::allocate(allocator_type&, size_type) [with _Tp = std::complex<float>; pointer = std::complex<float>*; allocator_type = std::allocator<std::complex<float> >; size_type = long unsigned int]’
+  614 |       { return __a.allocate(__n); }
+      |                ~~~~~~~~~~~~^~~~~
+/usr/include/c++/15/bits/stl_vector.h:387:33:   required from ‘std::_Vector_base<_Tp, _Alloc>::pointer std::_Vector_base<_Tp, _Alloc>::_M_allocate(std::size_t) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; pointer = std::complex<float>*; std::size_t = long unsigned int]’
+  387 |         return __n != 0 ? _Tr::allocate(_M_impl, __n) : pointer();
+      |                           ~~~~~~~~~~~~~^~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:405:33:   required from ‘void std::_Vector_base<_Tp, _Alloc>::_M_create_storage(std::size_t) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; std::size_t = long unsigned int]’
+  405 |         this->_M_impl._M_start = this->_M_allocate(__n);
+      |                                  ~~~~~~^~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:341:9:   required from ‘std::_Vector_base<_Tp, _Alloc>::_Vector_base(std::size_t, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; std::size_t = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  341 |       { _M_create_storage(__n); }
+      |         ^~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_vector.h:587:47:   required from ‘std::vector<_Tp, _Alloc>::vector(size_type, const allocator_type&) [with _Tp = std::complex<float>; _Alloc = std::allocator<std::complex<float> >; size_type = long unsigned int; allocator_type = std::allocator<std::complex<float> >]’
+  587 |       : _Base(_S_check_init_len(__n, __a), __a)
+      |                                               ^
+/home/alex/webdev/audioscan/src/Renderer.cpp:32:43:   required from here
+   32 |     std::vector<std::complex<float>> buf(n);
+      |                                           ^
+/usr/include/c++/15/bits/new_allocator.h:131:23: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  131 |         static_assert(sizeof(_Tp) != 0, "cannot allocate incomplete types");
+      |                       ^~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:138:42: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  138 |             if (__n > (std::size_t(-1) / sizeof(_Tp)))
+      |                                          ^~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:144:13: error: invalid application of ‘__alignof__’ to incomplete type ‘std::complex<float>’
+  144 |         if (alignof(_Tp) > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
+      |             ^~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:146:54: error: invalid application of ‘__alignof__’ to incomplete type ‘std::complex<float>’
+  146 |             std::align_val_t __al = std::align_val_t(alignof(_Tp));
+      |                                                      ^~~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:147:66: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  147 |             return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp),
+      |                                                                  ^~~~~~~~~~~
+/usr/include/c++/15/bits/new_allocator.h:151:62: error: invalid application of ‘sizeof’ to incomplete type ‘std::complex<float>’
+  151 |         return static_cast<_Tp*>(_GLIBCXX_OPERATOR_NEW(__n * sizeof(_Tp)));
+      |                                                              ^~~~~~~~~~~
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:197: CMakeFiles/audioscout.dir/src/Renderer.cpp.o] Error 1
+make[3]: *** Waiting for unfinished jobs....
+/home/alex/webdev/audioscan/src/AudioFile.cpp: In static member function ‘static bool AudioFile::probe(const QString&, AudioData&, QString*)’:
+/home/alex/webdev/audioscan/src/AudioFile.cpp:31:59: error: ‘SF_MODE_READ’ was not declared in this scope; did you mean ‘SFM_READ’?
+   31 |     SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_READ, &info);
+      |                                                           ^~~~~~~~~~~~
+      |                                                           SFM_READ
+/home/alex/webdev/audioscan/src/AudioFile.cpp:39:45: error: ‘SF_STR_COMMENTS’ was not declared in this scope; did you mean ‘SF_STR_COMMENT’?
+   39 |         const char *cmt = sf_get_string(sf, SF_STR_COMMENTS);
+      |                                             ^~~~~~~~~~~~~~~
+      |                                             SF_STR_COMMENT
+/home/alex/webdev/audioscan/src/AudioFile.cpp:50:45: warning: ‘virtual int TagLib::AudioProperties::length() const’ is deprecated [-Wdeprecated-declarations]
+   50 |         meta.totalFrames = qint64(ap->length()) * ap->sampleRate();
+      |                                   ~~~~~~~~~~^~
+In file included from /usr/include/taglib/fileref.h:33,
+                 from /home/alex/webdev/audioscan/src/AudioFile.cpp:9:
+/usr/include/taglib/audioproperties.h:82:17: note: declared here
+   82 |     virtual int length() const;
+      |                 ^~~~~~
+/home/alex/webdev/audioscan/src/AudioFile.cpp:53:9: error: ‘PropertyMap’ was not declared in this scope; did you mean ‘TagLib::PropertyMap’?
+   53 |         PropertyMap props = f.file()->properties();
+      |         ^~~~~~~~~~~
+      |         TagLib::PropertyMap
+In file included from /home/alex/webdev/audioscan/src/AudioFile.cpp:11:
+/usr/include/taglib/tpropertymap.h:122:9: note: ‘TagLib::PropertyMap’ declared here
+  122 |   class PropertyMap: public SimplePropertyMap
+      |         ^~~~~~~~~~~
+/home/alex/webdev/audioscan/src/AudioFile.cpp:54:13: error: ‘props’ was not declared in this scope
+   54 |         if (props.contains(QLatin1String("COMMENT")))
+      |             ^~~~~
+/home/alex/webdev/audioscan/src/AudioFile.cpp:59:75: error: no matching function for call to ‘TagLib::String::data()’
+   59 |             meta.comment = QString::fromStdWString(f.tag()->comment().data());
+      |                                                    ~~~~~~~~~~~~~~~~~~~~~~~^~
+/home/alex/webdev/audioscan/src/AudioFile.cpp:59:75: note: there is 1 candidate
+In file included from /usr/include/taglib/tag.h:30,
+                 from /usr/include/taglib/tfile.h:33,
+                 from /usr/include/taglib/fileref.h:29:
+/usr/include/taglib/tstring.h:351:16: note: candidate 1: ‘TagLib::ByteVector TagLib::String::data(Type) const’
+  351 |     ByteVector data(Type t) const;
+      |                ^~~~
+/usr/include/taglib/tstring.h:351:16: note: candidate expects 1 argument, 0 provided
+/home/alex/webdev/audioscan/src/AudioFile.cpp: In function ‘bool loadViaSndfile(const QString&, AudioData&, QString*)’:
+/home/alex/webdev/audioscan/src/AudioFile.cpp:97:59: error: ‘SF_MODE_READ’ was not declared in this scope; did you mean ‘SFM_READ’?
+   97 |     SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_READ, &info);
+      |                                                           ^~~~~~~~~~~~
+      |                                                           SFM_READ
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:169: CMakeFiles/audioscout.dir/src/FileDialogModel.cpp.o] Error 1
+/home/alex/webdev/audioscan/src/AudioFile.cpp:103:41: error: ‘SF_STR_COMMENTS’ was not declared in this scope; did you mean ‘SF_STR_COMMENT’?
+  103 |     const char *cmt = sf_get_string(sf, SF_STR_COMMENTS);
+      |                                         ^~~~~~~~~~~~~~~
+      |                                         SF_STR_COMMENT
+In file included from /home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/moc_MainWindow.cpp:9,
+                 from /home/alex/webdev/audioscan/build/audioscout_autogen/mocs_compilation.cpp:5:
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/MainWindow.h:34:25: error: ‘DirScanResult’ has not been declared
+   34 |     void onScanFinished(DirScanResult res);
+      |                         ^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/AudioFile.cpp: In static member function ‘static bool AudioFile::save(const QString&, const AudioData&, QString*)’:
+/home/alex/webdev/audioscan/src/AudioFile.cpp:144:59: error: ‘SF_MODE_WRITE’ was not declared in this scope; did you mean ‘SFM_WRITE’?
+  144 |     SNDFILE *sf = sf_open(path.toLocal8Bit().constData(), SF_MODE_WRITE, &info);
+      |                                                           ^~~~~~~~~~~~~
+      |                                                           SFM_WRITE
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/MainWindow.h:66:49: error: ‘FileDialogModel’ was not declared in this scope; did you mean ‘FileTableModel’?
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                 ^~~~~~~~~~~~~~~
+      |                                                 FileTableModel
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/MainWindow.h:66:69: error: template argument 1 is invalid
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                                     ^
+/home/alex/webdev/audioscan/src/AudioFile.cpp:148:27: error: ‘SF_STR_COMMENTS’ was not declared in this scope; did you mean ‘SF_STR_COMMENT’?
+  148 |         sf_set_string(sf, SF_STR_COMMENTS, data.comment.toUtf8().constData());
+      |                           ^~~~~~~~~~~~~~~
+      |                           SF_STR_COMMENT
+/home/alex/webdev/audioscan/src/PreviewWorker.cpp: In constructor ‘PreviewWorker::PreviewWorker(QObject*)’:
+/home/alex/webdev/audioscan/src/PreviewWorker.cpp:93:59: error: ‘void PreviewWorker::Runner::loop()’ is private within this context
+   93 |     connect(&thread, &QThread::started, runner_, &Runner::loop);
+      |                                                           ^~~~
+/home/alex/webdev/audioscan/src/PreviewWorker.cpp:33:10: note: declared private here
+   33 |     void loop() {
+      |          ^~~~
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/moc_MainWindow.cpp: In static member function ‘static void MainWindow::qt_static_metacall(QObject*, QMetaObject::Call, int, void**)’:
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/moc_MainWindow.cpp:147:37: error: cannot convert ‘MainWindow::DirScanResult’ to ‘int’
+  147 |         case 1: _t->onScanFinished((*reinterpret_cast< std::add_pointer_t<DirScanResult>>(_a[1]))); break;
+      |                                    ~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                     |
+      |                                     MainWindow::DirScanResult
+/home/alex/webdev/audioscan/build/audioscout_autogen/UVLADIE3JM/../../../src/MainWindow.h:34:39: note: initializing argument 1 of ‘void MainWindow::onScanFinished(int)’
+   34 |     void onScanFinished(DirScanResult res);
+      |                         ~~~~~~~~~~~~~~^~~
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:141: CMakeFiles/audioscout.dir/src/AudioFile.cpp.o] Error 1
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:183: CMakeFiles/audioscout.dir/src/PreviewWorker.cpp.o] Error 1
+/home/alex/webdev/audioscan/src/AudioView.cpp: In member function ‘virtual void AudioView::mouseMoveEvent(QMouseEvent*)’:
+/home/alex/webdev/audioscan/src/AudioView.cpp:284:54: error: expected unqualified-id before ‘[’ token
+  284 |             const_cast<QVector<Marker> *>(markers_)->[dragMarkerIdx_].timeSamples = f;
+      |                                                      ^
+/home/alex/webdev/audioscan/src/AudioView.cpp:286:58: error: expected unqualified-id before ‘[’ token
+  286 |                 const_cast<QVector<Marker> *>(markers_)->[dragMarkerIdx_].timeSec =
+      |                                                          ^
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:85: CMakeFiles/audioscout.dir/audioscout_autogen/mocs_compilation.cpp.o] Error 1
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:127: CMakeFiles/audioscout.dir/src/AudioView.cpp.o] Error 1
+In file included from /home/alex/webdev/audioscan/src/MainWindow.cpp:1:
+/home/alex/webdev/audioscan/src/MainWindow.h:34:25: error: ‘DirScanResult’ has not been declared
+   34 |     void onScanFinished(DirScanResult res);
+      |                         ^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.h:66:49: error: ‘FileDialogModel’ was not declared in this scope; did you mean ‘FileTableModel’?
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                 ^~~~~~~~~~~~~~~
+      |                                                 FileTableModel
+/home/alex/webdev/audioscan/src/MainWindow.h:66:69: error: template argument 1 is invalid
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                                     ^
+In file included from /home/alex/webdev/audioscan/src/main.cpp:2:
+/home/alex/webdev/audioscan/src/MainWindow.h:34:25: error: ‘DirScanResult’ has not been declared
+   34 |     void onScanFinished(DirScanResult res);
+      |                         ^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.h:66:49: error: ‘FileDialogModel’ was not declared in this scope; did you mean ‘FileTableModel’?
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                 ^~~~~~~~~~~~~~~
+      |                                                 FileTableModel
+/home/alex/webdev/audioscan/src/MainWindow.h:66:69: error: template argument 1 is invalid
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |                                                                     ^
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::buildUi()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:65:23: error: expected type-specifier before ‘QVBoxLayout’
+   65 |     auto *outer = new QVBoxLayout(central);
+      |                       ^~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:113:26: error: expected type-specifier before ‘QSplitter’
+  113 |     auto *splitter = new QSplitter(Qt::Horizontal, central);
+      |                          ^~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:123:26: error: expected type-specifier before ‘QVBoxLayout’
+  123 |     auto *rightLay = new QVBoxLayout(rightPanel);
+      |                          ^~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:151:22: error: ‘FileDialogModel’ has not been declared; did you mean ‘FileTableModel’?
+  151 |     connect(model_, &FileDialogModel::previewRequested, this, &MainWindow::requestPreview);
+      |                      ^~~~~~~~~~~~~~~
+      |                      FileTableModel
+/home/alex/webdev/audioscan/src/MainWindow.cpp:155:20: error: expected type-specifier before ‘QHBoxLayout’
+  155 |     auto *ab = new QHBoxLayout(actionsBar);
+      |                    ^~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:183:20: error: expected type-specifier before ‘QHBoxLayout’
+  183 |     auto *pb = new QHBoxLayout(playerBar);
+      |                    ^~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In lambda function:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:369:17: error: ‘FileDialogModel’ was not declared in this scope; did you mean ‘FileTableModel’?
+  369 |         QVector<FileDialogModel::Row> rows;
+      |                 ^~~~~~~~~~~~~~~
+      |                 FileTableModel
+/home/alex/webdev/audioscan/src/MainWindow.cpp:369:37: error: template argument 1 is invalid
+  369 |         QVector<FileDialogModel::Row> rows;
+      |                                     ^
+/home/alex/webdev/audioscan/src/MainWindow.cpp:393:18: error: request for member ‘push_back’ in ‘rows’, which is of non-class type ‘int’
+  393 |             rows.push_back(r);
+      |                  ^~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::onDirSelected(const QString&)’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:398:48: error: ‘FileDialogModel’ was not declared in this scope; did you mean ‘FileTableModel’?
+  398 |     auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+      |                                                ^~~~~~~~~~~~~~~
+      |                                                FileTableModel
+/home/alex/webdev/audioscan/src/MainWindow.cpp:398:68: error: template argument 1 is invalid
+  398 |     auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+      |                                                                    ^~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:398:75: error: template argument 1 is invalid
+  398 |     auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+      |                                                                           ^
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In lambda function:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:400:33: error: ‘watcher’ is not captured
+  400 |         DirScanResult res2{dir, watcher->result()};
+      |                                 ^~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:399:78: note: the lambda has no capture-default
+  399 |     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, dir]() {
+      |                                                                              ^
+/home/alex/webdev/audioscan/src/MainWindow.cpp:398:11: note: ‘<typeprefixerror>watcher’ declared here
+  398 |     auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+      |           ^~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:401:9: error: ‘watcher’ is not captured
+  401 |         watcher->deleteLater();
+      |         ^~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:399:78: note: the lambda has no capture-default
+  399 |     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, dir]() {
+      |                                                                              ^
+/home/alex/webdev/audioscan/src/MainWindow.cpp:398:11: note: ‘<typeprefixerror>watcher’ declared here
+  398 |     auto *watcher = new QFutureWatcher<QVector<FileDialogModel::Row>>(this);
+      |           ^~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:402:24: error: cannot convert ‘MainWindow::DirScanResult’ to ‘int’
+  402 |         onScanFinished(res2);
+      |                        ^~~~
+      |                        |
+      |                        MainWindow::DirScanResult
+/home/alex/webdev/audioscan/src/MainWindow.h:34:39: note: initializing argument 1 of ‘void MainWindow::onScanFinished(int)’
+   34 |     void onScanFinished(DirScanResult res);
+      |                         ~~~~~~~~~~~~~~^~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: At global scope:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:408:6: error: no declaration matches ‘void MainWindow::onScanFinished(DirScanResult)’
+  408 | void MainWindow::onScanFinished(DirScanResult res) {
+      |      ^~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.h:34:10: note: candidate is: ‘void MainWindow::onScanFinished(int)’
+   34 |     void onScanFinished(DirScanResult res);
+      |          ^~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.h:23:7: note: ‘class MainWindow’ defined here
+   23 | class MainWindow : public QMainWindow {
+      |       ^~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:408:33: error: ‘struct MainWindow::DirScanResult’ is private within this context
+  408 | void MainWindow::onScanFinished(DirScanResult res) {
+      |                                 ^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.h:66:12: note: declared private here
+   66 |     struct DirScanResult { QString dir; QVector<FileDialogModel::Row> rows; };
+      |            ^~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::refreshPreviewsForDir()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:433:21: error: no matching function for call to ‘min(int, qsizetype)’
+  433 |     int n = std::min(Settings::instance().previewPrefetchCount(), mutableRows.size());
+      |             ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:433:21: note: there are 4 candidates
+In file included from /usr/include/c++/15/algorithm:62,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qflags.h:10,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtCore/qglobal.h:49,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtGui/qtguiglobal.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtWidgets/qtwidgetsglobal.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:7,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtWidgets/QMainWindow:1,
+                 from /home/alex/webdev/audioscan/src/MainWindow.h:2:
+/usr/include/c++/15/bits/stl_algobase.h:234:5: note: candidate 1: ‘template<class _Tp> constexpr const _Tp& std::min(const _Tp&, const _Tp&)’
+  234 |     min(const _Tp& __a, const _Tp& __b)
+      |     ^~~
+/usr/include/c++/15/bits/stl_algobase.h:234:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:433:21: note:   deduced conflicting types for parameter ‘const _Tp’ (‘int’ and ‘qsizetype’ {aka ‘long long int’})
+  433 |     int n = std::min(Settings::instance().previewPrefetchCount(), mutableRows.size());
+      |             ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/c++/15/bits/stl_algobase.h:282:5: note: candidate 2: ‘template<class _Tp, class _Compare> constexpr const _Tp& std::min(const _Tp&, const _Tp&, _Compare)’
+  282 |     min(const _Tp& __a, const _Tp& __b, _Compare __comp)
+      |     ^~~
+/usr/include/c++/15/bits/stl_algobase.h:282:5: note: candidate expects 3 arguments, 2 provided
+In file included from /usr/include/c++/15/algorithm:63:
+/usr/include/c++/15/bits/stl_algo.h:5764:5: note: candidate 3: ‘template<class _Tp> constexpr _Tp std::min(initializer_list<_Tp>)’
+ 5764 |     min(initializer_list<_Tp> __l)
+      |     ^~~
+/usr/include/c++/15/bits/stl_algo.h:5764:5: note: candidate expects 1 argument, 2 provided
+/usr/include/c++/15/bits/stl_algo.h:5774:5: note: candidate 4: ‘template<class _Tp, class _Compare> constexpr _Tp std::min(initializer_list<_Tp>, _Compare)’
+ 5774 |     min(initializer_list<_Tp> __l, _Compare __comp)
+      |     ^~~
+/usr/include/c++/15/bits/stl_algo.h:5774:5: note: template argument deduction/substitution failed:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:433:21: note:   mismatched types ‘std::initializer_list<_Tp>’ and ‘int’
+  433 |     int n = std::min(Settings::instance().previewPrefetchCount(), mutableRows.size());
+      |             ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::onSearchClicked()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:449:16: error: invalid use of incomplete type ‘class QStatusBar’
+  449 |     statusBar()->showMessage(tr("No match for \"%1\" in current directory").arg(needle), 4000);
+      |                ^~
+/usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:20:7: note: forward declaration of ‘class QStatusBar’
+   20 | class QStatusBar;
+      |       ^~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘bool MainWindow::editGuarded()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:536:20: error: invalid use of incomplete type ‘class QStatusBar’
+  536 |         statusBar()->showMessage(tr("No active file"), 3000);
+      |                    ^~
+/usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:20:7: note: forward declaration of ‘class QStatusBar’
+   20 | class QStatusBar;
+      |       ^~~~~~~~~~
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:99: CMakeFiles/audioscout.dir/src/main.cpp.o] Error 1
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::doDeleteSelection()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:631:20: error: invalid use of incomplete type ‘class QStatusBar’
+  631 |         statusBar()->showMessage(tr("Delete selection requires an active selection"), 3000);
+      |                    ^~
+/usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:20:7: note: forward declaration of ‘class QStatusBar’
+   20 | class QStatusBar;
+      |       ^~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::undo()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:690:20: error: invalid use of incomplete type ‘class QStatusBar’
+  690 |         statusBar()->showMessage(tr("Nothing to undo"), 2000);
+      |                    ^~
+/usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:20:7: note: forward declaration of ‘class QStatusBar’
+   20 | class QStatusBar;
+      |       ^~~~~~~~~~
+/home/alex/webdev/audioscan/src/MainWindow.cpp:701:63: error: invalid conversion from ‘QList<float>::const_pointer’ {aka ‘const float*’} to ‘qsizetype’ {aka ‘long long int’} [-fpermissive]
+  701 |         audio_.samples.insert(rec->offset * ch, orig.constData(), orig.size());
+      |                                                 ~~~~~~~~~~~~~~^~
+      |                                                               |
+      |                                                               QList<float>::const_pointer {aka const float*}
+In file included from /usr/include/x86_64-linux-gnu/qt6/QtCore/qobject.h:13,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtWidgets/qwidget.h:9,
+                 from /usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:8:
+/usr/include/x86_64-linux-gnu/qt6/QtCore/qlist.h:892:41: note: initializing argument 2 of ‘QList<T>::iterator QList<T>::insert(qsizetype, qsizetype, parameter_type) [with T = float; qsizetype = long long int; parameter_type = float]’
+  892 | QList<T>::insert(qsizetype i, qsizetype n, parameter_type t)
+      |                               ~~~~~~~~~~^
+/home/alex/webdev/audioscan/src/MainWindow.cpp: In member function ‘void MainWindow::redo()’:
+/home/alex/webdev/audioscan/src/MainWindow.cpp:729:20: error: invalid use of incomplete type ‘class QStatusBar’
+  729 |         statusBar()->showMessage(tr("Nothing to redo"), 2000);
+      |                    ^~
+/usr/include/x86_64-linux-gnu/qt6/QtWidgets/qmainwindow.h:20:7: note: forward declaration of ‘class QStatusBar’
+   20 | class QStatusBar;
+      |       ^~~~~~~~~~
+make[3]: *** [CMakeFiles/audioscout.dir/build.make:113: CMakeFiles/audioscout.dir/src/MainWindow.cpp.o] Error 1
+make[2]: *** [CMakeFiles/Makefile2:90: CMakeFiles/audioscout.dir/all] Error 2
+make[1]: *** [Makefile:136: all] Error 2
+make: *** [makefile:10: all] Error 2
