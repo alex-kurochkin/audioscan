@@ -566,7 +566,6 @@ void MainWindow::onDirSelected(const QString &path) {
     currentDir_ = dir;
 
     // Background scan (spec 3.1/12): never block UI.
-    DirScanResult res{dir, {}};
     auto future = QtConcurrent::run([dir]() {
         QVector<FileTableModel::Row> rows;
         QDir d(dir);
@@ -577,7 +576,9 @@ void MainWindow::onDirSelected(const QString &path) {
             r.path = fi.absoluteFilePath();
             r.name = fi.fileName();
             r.size = fi.size();
+            // birthTime is often invalid on Linux filesystems; fall back to ctime.
             r.created = fi.birthTime().isValid() ? fi.birthTime() : fi.metadataChangeTime();
+            if (!r.created.isValid()) r.created = fi.fileTime(QFileDevice::FileBirthTime);
             r.modified = fi.lastModified();
             AudioData meta;
             QString err;
@@ -590,6 +591,7 @@ void MainWindow::onDirSelected(const QString &path) {
                     ? QStringLiteral("compressed") : sampleFormatName(meta.format);
                 r.comment = meta.comment;
             } else {
+                qWarning() << "scanDirectory: probe failed for" << r.path << "-" << err;
                 r.broken = true;   // red row, no params, no preview (spec 3.3)
             }
             rows.push_back(r);
@@ -604,11 +606,14 @@ void MainWindow::onDirSelected(const QString &path) {
         onScanFinished(res2);
     });
     watcher->setFuture(future);
-    Q_UNUSED(res);
 }
 
 void MainWindow::onScanFinished(DirScanResult res) {
     if (res.dir != currentDir_) return;    // stale scan
+    int ok = 0, brokenCnt = 0;
+    for (const auto &r : res.rows) r.broken ? ++brokenCnt : ++ok;
+    DBG(QStringLiteral("scan finished: dir=%1 rows=%2 ok=%3 broken=%4")
+        .arg(res.dir).arg(res.rows.size()).arg(ok).arg(brokenCnt));
     model_->setRows(res.rows);
     model_->sort(FileTableModel::ColName, Qt::AscendingOrder);
     // lazy prefetch of first N previews (spec 2.4)
@@ -1041,13 +1046,13 @@ void MainWindow::applyEditToRange(std::function<void()> op, const QString &type,
         auto rows = model_->rows();
         int row = currentRow();
         if (row >= 0 && row < rows.size()) {
-            auto mutableRows = rows;
-            mutableRows[row].previewLoaded = false;
-            mutableRows[row].preview = QImage();
-            mutableRows[row].frames = audio_.totalFrames;
-            mutableRows[row].size = QFileInfo(currentPath_).size();
-            mutableRows[row].modified = QFileInfo(currentPath_).lastModified();
-            model_->setRows(mutableRows);
+            FileTableModel::Row upd = rows[row];
+            upd.previewLoaded = false;
+            upd.preview = QImage();
+            upd.frames = audio_.totalFrames;
+            upd.size = QFileInfo(currentPath_).size();
+            upd.modified = QFileInfo(currentPath_).lastModified();
+            model_->updateRow(row, upd);   // in-place refresh, keeps selection intact
             requestPreview(row);
         }
     }

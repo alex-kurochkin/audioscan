@@ -83,8 +83,24 @@ static bool probeWithFfprobe(const QString &path, AudioData &meta) {
     p.setArguments({"-v", "quiet", "-print_format", "json",
                     "-show_streams", "-show_format", path});
     p.start();
-    if (!p.waitForStarted(5000) || !p.waitForFinished(15000) || p.exitCode() != 0)
+    // Note: -1 (block until finished) must NOT be passed to waitFor* directly,
+    // since the int parameter would be truncated to 0 ms and the process would
+    // always "time out" instantly. Use a large explicit timeout instead.
+    if (!p.waitForStarted(5000)) {
+        qWarning() << "probeWithFfprobe: failed to start ffprobe for" << path;
         return false;
+    }
+    if (!p.waitForFinished(30000)) {
+        qWarning() << "probeWithFfprobe: ffprobe timed out for" << path;
+        p.kill();
+        p.waitForFinished(2000);
+        return false;
+    }
+    if (p.exitCode() != 0) {
+        qWarning() << "probeWithFfprobe: ffprobe exit" << p.exitCode()
+                   << "stderr:" << QString::fromUtf8(p.readAllStandardError()).trimmed();
+        return false;
+    }
     const QJsonDocument doc = QJsonDocument::fromJson(p.readAllStandardOutput());
     if (!doc.isObject()) return false;
     const QJsonObject root = doc.object();

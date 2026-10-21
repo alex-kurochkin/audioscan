@@ -32,6 +32,7 @@ public:
 
     void setRows(const QVector<Row> &rows);
     const QVector<Row> &rows() const { return rows_; }
+    void updateRow(int row, const Row &r);   // in-place refresh with dataChanged
     void setPreview(int row, const QImage &img);
     QImage previewAt(int row) const;
     void updateVisibleColumns(const QVector<int> &orderedVisibleCols);

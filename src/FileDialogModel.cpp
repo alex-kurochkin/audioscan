@@ -30,6 +30,13 @@ void FileTableModel::setRows(const QVector<Row> &rows) {
     endResetModel();
 }
 
+// Refresh a single row in place (emits dataChanged so the view repaints).
+void FileTableModel::updateRow(int row, const Row &r) {
+    if (row < 0 || row >= rows_.size()) return;
+    rows_[row] = r;
+    emit dataChanged(index(row, 0), index(row, visibleCols_.size() - 1));
+}
+
 void FileTableModel::setPreview(int row, const QImage &img) {
     if (row < 0 || row >= rows_.size()) return;
     rows_[row].preview = img;
@@ -69,13 +76,16 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const {
         return {};
 
     if (r.broken) {
-        if (col == ColName && role == Qt::DisplayRole) return r.name;
-        if (col == ColCreated && role == Qt::DisplayRole)
-            return r.created.toString(Qt::ISODate);
-        if (col == ColModified && role == Qt::DisplayRole)
-            return r.modified.toString(Qt::ISODate);
-        if (role == Qt::ToolTipRole) return QStringLiteral("Unreadable / broken audio file");
-        return {};
+        // Broken rows still show basic filesystem info (name, size, dates),
+        // only audio params and preview are omitted (spec 3.3).
+        if (role != Qt::DisplayRole) return {};
+        switch (col) {
+        case ColName:     return r.name;
+        case ColSize:     return QLocale().formattedDataSize(r.size);
+        case ColCreated:  return r.created.isValid() ? r.created.toString(Qt::ISODate) : QVariant();
+        case ColModified: return r.modified.isValid() ? r.modified.toString(Qt::ISODate) : QVariant();
+        default:          return {};
+        }
     }
 
     switch (col) {
