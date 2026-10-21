@@ -5,6 +5,11 @@
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QLocale>
+#include <cmath>
 #include <sndfile.h>
 #include <taglib/fileref.h>
 #include <taglib/tag.h>
@@ -25,6 +30,11 @@ static SampleFormat sfToFormat(int format) {
         default:               return SampleFormat::Unknown;
     }
 }
+
+// Probe audio parameters (sample rate, channels, frames, sample type, comment).
+// Tries libsndfile, then TagLib, then ffprobe as a last resort so that
+// compressed formats (mp3/ogg/m4a) still show full metadata in the table.
+static bool probeWithFfprobe(const QString &path, AudioData &meta);
 
 bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
     SF_INFO info{};
@@ -60,7 +70,62 @@ bool AudioFile::probe(const QString &path, AudioData &meta, QString *err) {
             meta.comment = QString::fromUtf8(f.tag()->comment().toCString(true));
         return true;
     }
+    // Last resort: ffprobe (handles mp3/ogg/m4a when TagLib fails).
+    if (probeWithFfprobe(path, meta))
+        return true;
     if (err) *err = QStringLiteral("Unsupported or corrupted file");
+    return false;
+}
+
+static bool probeWithFfprobe(const QString &path, AudioData &meta) {
+    QProcess p;
+    p.setProgram(QStringLiteral("ffprobe"));
+    p.setArguments({"-v", "quiet", "-print_format", "json",
+                    "-show_streams", "-show_format", path});
+    p.start();
+    if (!p.waitForStarted(5000) || !p.waitForFinished(15000) || p.exitCode() != 0)
+        return false;
+    const QJsonDocument doc = QJsonDocument::fromJson(p.readAllStandardOutput());
+    if (!doc.isObject()) return false;
+    const QJsonObject root = doc.object();
+    for (const QJsonValue &sv : root.value(QStringLiteral("streams")).toArray()) {
+        const QJsonObject s = sv.toObject();
+        if (s.value(QStringLiteral("codec_type")).toString() != QLatin1String("audio"))
+            continue;
+        meta.sampleRate = s.value(QStringLiteral("sample_rate")).toInt();
+        meta.channels = s.value(QStringLiteral("channels")).toInt();
+        double durSec = s.value(QStringLiteral("duration")).toDouble(
+                        root.value(QStringLiteral("format")).toObject()
+                            .value(QStringLiteral("duration")).toDouble());
+        meta.totalFrames = qint64(std::llround(durSec * meta.sampleRate));
+        const QString pf = s.value(QStringLiteral("pcm_format")).toString();
+        const int bits = s.value(QStringLiteral("bits_per_raw_sample")).toInt(0);
+        if (!pf.isEmpty() || bits > 0) {   // uncompressed stream
+            if (pf == QLatin1String("f32le") || pf == QLatin1String("f32be"))
+                meta.format = SampleFormat::Float32;
+            else if (pf == QLatin1String("f64le"))
+                meta.format = SampleFormat::Float64;
+            else if (bits >= 24) meta.format = SampleFormat::Int24;
+            else if (bits >= 16) meta.format = SampleFormat::Int16;
+            else if (bits > 0)   meta.format = SampleFormat::UInt8;
+        } else {
+            meta.format = SampleFormat::Unknown;   // compressed
+        }
+        meta.valid = meta.sampleRate > 0 && meta.channels > 0 && meta.totalFrames > 0;
+        // Comment from tags if present.
+        const QJsonObject tags = s.value(QStringLiteral("tags")).toObject().isEmpty()
+                                 ? root.value(QStringLiteral("format")).toObject()
+                                       .value(QStringLiteral("tags")).toObject()
+                                 : s.value(QStringLiteral("tags")).toObject();
+        for (const QString &key : {QStringLiteral("comment"), QStringLiteral("COMMENT"),
+                                   QStringLiteral("description")}) {
+            if (tags.contains(key)) {
+                meta.comment = tags.value(key).toString();
+                break;
+            }
+        }
+        return meta.valid;
+    }
     return false;
 }
 

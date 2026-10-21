@@ -1,11 +1,10 @@
 #pragma once
+#include <QAudioSink>
 #include <QAudioFormat>
 #include <QObject>
 #include <QIODevice>
 #include <cstdint>
-
-class QAudioSink;
-class QAudioSource;
+#include <functional>
 
 // Playback of an interleaved float PCM buffer via Qt Multimedia (QAudioSink).
 // Supports volume gain, loop of a frame range, and start/end range playback.
@@ -14,6 +13,12 @@ class AudioPlayer : public QObject {
 public:
     explicit AudioPlayer(QObject *parent = nullptr);
     ~AudioPlayer() override;
+
+    // Sink factory: creates the output sink for a given format. Defaults to a
+    // real QAudioSink on the default audio device; can be replaced (e.g. with
+    // an "aplay" pipe fallback when Qt Multimedia has no usable device).
+    using SinkFactory = std::function<QAudioSink *(const QAudioFormat &)>;
+    void setSinkFactory(SinkFactory f) { sinkFactory_ = std::move(f); }
 
     // Set the whole decoded buffer (interleaved float32).
     void setBuffer(const float *data, qint64 totalFrames, int channels, int sampleRate);
@@ -55,6 +60,7 @@ private:
 
     QAudioSink *sink_ = nullptr;
     FloatPcmDevice *device_ = nullptr;
+    SinkFactory sinkFactory_;
 
     qint64 posFrames_ = 0;       // next frame to output
     qint64 startFrames_ = 0;     // where Play began (for Stop rewind)
