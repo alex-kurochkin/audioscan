@@ -1,18 +1,16 @@
-#!/usr/bin/make -f
-# Top-level convenience makefile (spec 1.2): builds the app and can produce a .deb.
+BUILD_DIR   := build
+CMAKE_FLAGS := -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+JOBS        := $(shell nproc)
 
-.PHONY: all build deb clean
+.PHONY: all clean install
 
-all: build
-
-build:
-mkdir -p build
-cd build && cmake .. -DCMAKE_BUILD_TYPE=Release
-cd build && make -j$$(nproc)
-
-deb:
-dpkg-buildpackage -us -uc -b
+all:
+	@mkdir -p $(BUILD_DIR)
+	cd $(BUILD_DIR) && cmake $(CMAKE_FLAGS) ..
+	cd $(BUILD_DIR) && make -j$(JOBS)
 
 clean:
-rm -rf build obj-*
--dh_clean
+	rm -rf $(BUILD_DIR)
+
+install: all
+	cd $(BUILD_DIR) && make DESTDIR=$(DESTDIR) install
