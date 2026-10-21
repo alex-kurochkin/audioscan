@@ -15,6 +15,7 @@ public:
     void setMode(const QString &mode);              // "wave" | "spectrogram"
     void setMarkers(const QVector<Marker> *markers);// owned externally
     void setPlayheadFrame(qint64 frame);
+    qint64 playheadFrame() const { return cursorFrame_; }
     void setActiveMarkerIndex(int idx);
 
     int frameToX(qint64 f) const;   // exposed for hit-testing helpers

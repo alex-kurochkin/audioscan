@@ -8,6 +8,7 @@
 #include <QSlider>
 #include <QDoubleSpinBox>
 #include <QFileSystemModel>
+#include <QElapsedTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <functional>
@@ -99,7 +100,14 @@ private:
     // playback always works. playProc_ owns the temp file path.
     QProcess *playProc_ = nullptr;
     QString playTmpPath_;
-    void startFfmpegFallback(qint64 startSec, qint64 endSec);
+    // Current fallback range in frames (for pause/resume and loop restart).
+    qint64 fbStartFrame_ = 0, fbEndFrame_ = 0;
+    bool fbLooping_ = false;
+    bool wasPlaying_ = false;           // fallback session active (vs. stopped/paused)
+    qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
+    QElapsedTimer fbClock_;             // timing for fbElapsedMs_
+    void startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop);
     void stopFfmpegFallback();
+    void resumeFfmpegFallback();
     PreviewWorker *previewWorker_ = nullptr;
 };

@@ -654,38 +654,52 @@ void MainWindow::loadCurrentFile() {
 
 void MainWindow::playPause() {
     if (!audio_.valid) return;
-    if (player_.isPlaying()) {
+    if (player_.isPlaying()) {          // in-process Qt sink is running
         player_.pause();
-        stopFfmpegFallback();
         playBtn_->setText(tr("Play"));
         return;
     }
+    if (playProc_) {                     // external fallback is running: pause it
+        qint64 cur = view_->playheadFrame();
+        stopFfmpegFallback();            // keeps fbStart/End/Loop, resets wasPlaying_
+        if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
+        view_->setPlayheadFrame(cur);    // resume point remembered by -ss below
+        playBtn_->setText(tr("Play"));
+        return;
+    }
+
     qint64 start = view_->cursorFrame();
     qint64 end = audio_.totalFrames;
     if (view_->hasSelection()) {
         start = view_->selStart();
         end = view_->selEnd();
     }
-    // If the previous session ended instantly (no usable output device was
-    // found), go straight to the external ffmpeg fallback instead of
-    // "blinking" the Play button again.
-    const bool sinkAvailable = !QMediaDevices::defaultAudioOutput().isNull();
-    if (sinkAvailable) {
-        const qint64 posBefore = player_.currentFrame();
-        player_.play(start, end, loopBtn_->isChecked());
-        if (player_.isPlaying()) {
-            playBtn_->setText(tr("Pause"));
-            return;
-        }
-        // Playback died immediately — fall through to ffmpeg below.
-        Q_UNUSED(posBefore);
+    const bool loop = loopBtn_->isChecked();
+
+    // Preferred path: in-process playback via Qt Multimedia (QAudioSink with
+    // an ALSA/PulseAudio/PipeWire device, or the aplay/ffplay pipe fallback).
+    // If the sink dies right away (e.g. no plugin, device busy) we detect it
+    // after a short delay and transparently switch to the direct ffmpeg path
+    // so the button never just "blinks".
+    player_.play(start, end, loop);
+    if (player_.isPlaying()) {
+        playBtn_->setText(tr("Pause"));
+        QTimer::singleShot(250, this, [this, start, end, loop] {
+            // Still running normally — nothing to do.
+            if (player_.isPlaying() || playProc_) return;
+            qWarning() << "MainWindow: Qt audio output failed instantly, switching to ffmpeg";
+            startFfmpegFallback(start, end, loop);
+            if (!playProc_)
+                statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
+        });
+        return;
     }
-    startFfmpegFallback(double(start) / audio_.sampleRate,
-                        double(end) / audio_.sampleRate);
-    if (playProc_ && playProc_->state() == QProcess::Running) {
+    // Sink unavailable outright — go straight to the direct ffmpeg fallback.
+    startFfmpegFallback(start, end, loop);
+    if (playProc_) {
         playBtn_->setText(tr("Pause"));
     } else {
-        statusBar()->showMessage(tr("No audio output available (check PulseAudio/PipeWire/ALSA or install ffmpeg)"), 5000);
+        statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
         playBtn_->setText(tr("Play"));
     }
 }
@@ -693,16 +707,39 @@ void MainWindow::playPause() {
 void MainWindow::stopPlayback() {
     player_.stop();
     stopFfmpegFallback();
+    fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
     playBtn_->setText(tr("Play"));
     view_->setPlayheadFrame(player_.currentFrame());
 }
 
 // ---------------- ffmpeg direct-playback fallback ----------------
+//
+// On Ubuntu the Qt Multimedia stack may open a device (the ALSA/Pulse click
+// you hear) yet fail to actually stream our format, so QAudioSink stops
+// instantly. This fallback spawns an external player on a temp WAV copy of
+// the decoded buffer — the same path VLC uses successfully.
 
-void MainWindow::startFfmpegFallback(qint64 startSec, qint64 endSec) {
+void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop) {
     stopFfmpegFallback();
+    if (!audio_.valid || audio_.sampleRate <= 0) return;
+    fbStartFrame_ = startFrame;
+    fbEndFrame_ = endFrame;
+    fbLooping_ = loop;
+
+    const double sr = audio_.sampleRate;
+    // Resume from the current playhead if it was moved past the start point.
+    qint64 fromFrame = std::max(startFrame, view_->playheadFrame());
+    if (fromFrame >= endFrame) fromFrame = startFrame;   // finished range -> restart
+    const double startSec = double(fromFrame) / sr;
+    const double durSec = double(endFrame - fromFrame) / sr;
+    if (durSec <= 0.001) return;
+
     QString ff = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
-    if (ff.isEmpty()) return;
+    if (ff.isEmpty()) {
+        qWarning() << "MainWindow: ffmpeg not found, cannot use playback fallback";
+        fbStartFrame_ = 0; fbEndFrame_ = 0;
+        return;
+    }
 
     // Write a temp WAV copy of the current buffer so ffmpeg has a reliable,
     // seekable input regardless of the original container/codec.
@@ -710,44 +747,82 @@ void MainWindow::startFfmpegFallback(qint64 startSec, qint64 endSec) {
                       .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
     QTemporaryFile tmp(playTmpPath_);
     tmp.setAutoRemove(false);
-    if (!tmp.open()) return;
+    if (!tmp.open()) { fbStartFrame_ = 0; fbEndFrame_ = 0; return; }
     playTmpPath_ = tmp.fileName();
     tmp.close();
 
     AudioData copy = audio_;
     QString err;
     if (!AudioFile::save(playTmpPath_, copy, &err)) {
+        qWarning().noquote() << "MainWindow: fallback temp WAV save failed:" << err;
         QFile::remove(playTmpPath_);
         playTmpPath_.clear();
+        fbStartFrame_ = 0; fbEndFrame_ = 0;
         return;
     }
 
     playProc_ = new QProcess(this);
     connect(playProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this, [this](int, QProcess::ExitStatus) {
+            this, [this](int code, QProcess::ExitStatus status) {
                 if (playProc_) { playProc_->deleteLater(); playProc_ = nullptr; }
                 QFile::remove(playTmpPath_);
                 playTmpPath_.clear();
+                if (!wasPlaying_) return;      // stopped/paused intentionally
+                wasPlaying_ = false;
+                if (status == QProcess::CrashExit || code != 0) {
+                    statusBar()->showMessage(tr("Playback failed (external player error)"), 5000);
+                } else if (fbLooping_) {
+                    // Loop: restart the range when the clip ends.
+                    QTimer::singleShot(30, this, [this] {
+                        if (wasPlaying_) return;
+                        view_->setPlayheadFrame(fbStartFrame_);
+                        startFfmpegFallback(fbStartFrame_, fbEndFrame_, true);
+                    });
+                    return;
+                }
                 if (playBtn_) playBtn_->setText(tr("Play"));
             });
     QStringList args;
-    args << "-hide_banner" << "-loglevel" << "quiet" << "-nodisp" << "-re";
+    args << "-hide_banner" << "-loglevel" << "error" << "-re";
     if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
-    if (endSec > startSec) args << "-t" << QString::number(endSec - startSec, 'f', 3);
+    args << "-t" << QString::number(durSec, 'f', 3);
     args << "-i" << playTmpPath_ << "-vn" << "-autoexit";
     playProc_->setProgram(ff);
     playProc_->setArguments(args);
+    playProc_->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    wasPlaying_ = true;
+    fbElapsedMs_ = 0;
+    fbClock_.start();
     playProc_->start();
     if (!playProc_->waitForStarted(3000)) {
+        qWarning() << "MainWindow: failed to start ffmpeg playback process";
+        playProc_->disconnect(this);
         playProc_->deleteLater();
         playProc_ = nullptr;
+        wasPlaying_ = false;
         QFile::remove(playTmpPath_);
         playTmpPath_.clear();
+        fbStartFrame_ = 0; fbEndFrame_ = 0;
     }
 }
 
+void MainWindow::resumeFfmpegFallback() {
+    startFfmpegFallback(fbStartFrame_, fbEndFrame_, fbLooping_);
+    if (playProc_) playBtn_->setText(tr("Pause"));
+}
+
 void MainWindow::stopFfmpegFallback() {
+    wasPlaying_ = false;
     if (!playProc_) return;
+    fbElapsedMs_ += fbClock_.isValid() ? fbClock_.elapsed() : 0;
+    // Remember roughly where playback stopped so the next Play resumes there.
+    qint64 cur = view_->playheadFrame();
+    if (cur < fbStartFrame_ || cur >= fbEndFrame_) {
+        const double sr = audio_.sampleRate > 0 ? audio_.sampleRate : 1;
+        const double elapsed = fbElapsedMs_ / 1000.0;
+        cur = std::min(fbEndFrame_, fbStartFrame_ + qint64(elapsed * sr));
+    }
+    view_->setPlayheadFrame(cur);
     playProc_->disconnect(this);
     if (playProc_->state() != QProcess::NotRunning) {
         playProc_->kill();
