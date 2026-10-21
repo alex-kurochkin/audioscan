@@ -72,6 +72,13 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const {
 
     if (role == Qt::ForegroundRole && r.broken)
         return QColor(220, 40, 40);   // broken files in red (spec 2.4/3.3)
+    // Preview images are delivered through DecorationRole; everything else
+    // is plain text via DisplayRole. Other roles stay empty.
+    if (role == Qt::DecorationRole) {
+        if (col == ColPreview && !r.broken && r.previewLoaded && !r.preview.isNull())
+            return r.preview;
+        return {};
+    }
     if (role != Qt::DisplayRole)
         return {};
 
