@@ -13,18 +13,63 @@
 
 static const int kMarkerHitPx = 6;
 
+const int AudioView::kScrollBarH = 14;   // reserved strip at the bottom of the widget
+
+namespace {
+// Usable drawing height: the bottom strip is reserved for the horizontal
+// scrollbar so the waveform/spectrogram never gets covered by it.
+inline int viewContentHeight(const QWidget *v) {
+    return std::max(32, v->height() - AudioView::kScrollBarH);
+}
+} // namespace
+
 AudioView::AudioView(QWidget *parent) : QWidget(parent) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumHeight(140);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    // Bottom horizontal scrollbar (spec: navigation area must have a scroll
+    // bar at the bottom). It mirrors the zoomed view window: page step ==
+    // one screenful of frames, and it stays hidden while the whole file fits.
+    scrollBar_ = new QScrollBar(Qt::Horizontal, this);
+    scrollBar_->setGeometry(0, height() - kScrollBarH, width(), kScrollBarH);
+    scrollBar_->hide();
+    connect(scrollBar_, &QScrollBar::valueChanged, this, [this](int v) {
+        if (scrollSync_) return;               // programmatic update: no re-entry
+        if (!audio_) return;
+        qint64 len = viewLen_ > 0 ? viewLen_ : audio_->totalFrames;
+        viewStart_ = std::clamp<qint64>(qint64(v), 0,
+                                        std::max<qint64>(0, audio_->totalFrames - len));
+        rebuildBaseImage();
+        update();
+    });
+}
+
+void AudioView::syncScrollBar() {
+    if (!scrollBar_) return;
+    const bool zoomed = audio_ && audio_->valid && viewLen_ > 0 &&
+                        viewLen_ < audio_->totalFrames;
+    scrollBar_->setVisible(zoomed);
+    scrollBar_->setGeometry(0, std::max(0, height() - kScrollBarH),
+                            width(), kScrollBarH);
+    if (!zoomed) return;
+    const qint64 maxV = std::max<qint64>(0, audio_->totalFrames - viewLen_);
+    scrollSync_ = true;
+    scrollBar_->setRange(0, int(maxV));
+    scrollBar_->setPageStep(int(std::min<qint64>(viewLen_, maxV > 0 ? maxV : 1)));
+    scrollBar_->setSingleStep(std::max<qint64>(1, viewLen_ / 50));
+    scrollBar_->setValue(int(viewStart_));
+    scrollSync_ = false;
 }
 
 void AudioView::setData(const AudioData *audio) {
     audio_ = audio;
     viewStart_ = 0; viewLen_ = 0; selStart_ = selEnd_ = -1; cursorFrame_ = 0;
     activeMarker_ = -1;
+    sampleLevel_ = false;
     rebuildBaseImage();
+    syncScrollBar();
     update();
 }
 
@@ -86,6 +131,7 @@ void AudioView::scrollToFrame(qint64 f) {
     qint64 len = viewLen_ > 0 ? viewLen_ : audio_->totalFrames;
     viewStart_ = std::clamp<qint64>(f, 0, std::max<qint64>(0, audio_->totalFrames - len));
     if (viewLen_ == 0) viewStart_ = 0;
+    syncScrollBar();
     update();
 }
 
@@ -108,6 +154,7 @@ void AudioView::applyZoom(double factor, int mouseX) {
     sampleLevel_ = viewLen_ > 0 && (double(total) / viewLen_) > 40.0 &&
                   viewLen_ < 8192; // deep zoom: show individual samples
     rebuildBaseImage();
+    syncScrollBar();
     update();
 }
 
@@ -117,25 +164,34 @@ void AudioView::zoomOut() { applyZoom(1.0 / 1.5, width() / 2); }
 void AudioView::zoomReset() {
     viewStart_ = 0; viewLen_ = 0; sampleLevel_ = false;
     rebuildBaseImage();
+    syncScrollBar();
     update();
 }
 
 void AudioView::rebuildBaseImage() {
     base_ = QImage();
     if (!audio_ || !audio_->valid) return;
-    // Render at widget resolution for the current view window.
+    // Render at widget resolution for the current view window. The height
+    // excludes the reserved bottom scrollbar strip.
     int w = std::max(64, width());
-    int h = std::max(64, height());
-    if (sampleLevel_ && mode_ == QLatin1String("wave")) {
+    int h = std::max(32, viewContentHeight(this));
+    if (sampleLevel_) {
+        // Deep zoom: draw individual samples instead of min/max envelopes.
+        // Works in both display modes — the spectrogram gets a per-sample
+        // amplitude plot (its STFT resolution is fixed by the FFT window and
+        // cannot resolve single samples, so at this zoom level the raw signal
+        // is the only meaningful rendering).
         base_ = QImage(w, h, QImage::Format_ARGB32);
         base_.fill(QColor(24, 24, 28));
         QPainter p(&base_);
         p.setRenderHint(QPainter::Antialiasing);
-        // draw individual samples as dots/bars
         const int ch = audio_->channels;
         qint64 len = viewLen_ > 0 ? viewLen_ : audio_->totalFrames;
         qint64 start = viewLen_ > 0 ? viewStart_ : 0;
-        p.setPen(QColor(90, 200, 120));
+        const QColor col = (mode_ == QLatin1String("spectrogram"))
+                               ? QColor(120, 180, 255)     // spectrogram accent
+                               : QColor(90, 200, 120);     // waveform accent
+        p.setPen(col);
         for (int x = 0; x < w; ++x) {
             qint64 f = start + qint64(double(x) / w * len);
             if (f >= audio_->totalFrames) break;
@@ -175,31 +231,33 @@ void AudioView::resizeEvent(QResizeEvent *e) {
     // The cached base image is rendered at widget resolution; rebuild it so a
     // resized view never stretches/stales the old bitmap.
     if (audio_ && audio_->valid) rebuildBaseImage();
+    syncScrollBar();
 }
 
 void AudioView::paintEvent(QPaintEvent *) {
     QPainter p(this);
+    const QRect content(0, 0, width(), std::max(1, viewContentHeight(this)));
     p.fillRect(rect(), QColor(24, 24, 28));
     if (!audio_ || !audio_->valid) {
         p.setPen(Qt::gray);
-        p.drawText(rect(), Qt::AlignCenter, tr("No audio loaded"));
+        p.drawText(content, Qt::AlignCenter, tr("No audio loaded"));
         return;
     }
     if (base_.isNull()) rebuildBaseImage();
-    p.drawImage(rect(), base_);
+    p.drawImage(content, base_);
 
     // selection overlay
     if (hasSelection()) {
         int x1 = frameToX(selStart_), x2 = frameToX(selEnd_);
-        QRect r(x1, 0, x2 - x1, height());
+        QRect r(x1, 0, x2 - x1, content.height());
         p.fillRect(r, QColor(80, 140, 255, 70));
         p.setPen(QColor(80, 140, 255));
-        p.drawLine(x1, 0, x1, height());
-        p.drawLine(x2, 0, x2, height());
+        p.drawLine(x1, 0, x1, content.height());
+        p.drawLine(x2, 0, x2, content.height());
         // edge handles
         p.setBrush(QColor(80, 140, 255));
-        p.drawRect(x1 - 3, height() / 2 - 8, 6, 16);
-        p.drawRect(x2 - 3, height() / 2 - 8, 6, 16);
+        p.drawRect(x1 - 3, content.height() / 2 - 8, 6, 16);
+        p.drawRect(x2 - 3, content.height() / 2 - 8, 6, 16);
     }
 
     // markers: label on top + dashed vertical line
@@ -212,7 +270,7 @@ void AudioView::paintEvent(QPaintEvent *) {
             QColor col = active ? QColor(255, 200, 60) : QColor(120, 180, 255);
             QPen pen(col, 1, Qt::DashLine);
             p.setPen(pen);
-            p.drawLine(x, 18, x, height());
+            p.drawLine(x, 18, x, content.height());
             p.setPen(Qt::NoPen);
             p.setBrush(col);
             QString label = m.name.isEmpty() ? QStringLiteral("M%1").arg(i + 1) : m.name;
@@ -227,7 +285,7 @@ void AudioView::paintEvent(QPaintEvent *) {
     // playhead
     int px = frameToX(cursorFrame_);
     p.setPen(QPen(QColor(255, 90, 90), 2));
-    p.drawLine(px, 0, px, height());
+    p.drawLine(px, 0, px, content.height());
     p.setBrush(QColor(255, 90, 90));
     p.setPen(Qt::NoPen);
     QPolygon tri;
@@ -248,6 +306,9 @@ static int markerIndexAt(const QVector<Marker> *markers, AudioView *v, int x) {
 
 void AudioView::mousePressEvent(QMouseEvent *e) {
     if (!audio_) return;
+    // Clicks inside the reserved bottom scrollbar strip belong to the bar
+    // itself, not to the view (no selection / cursor move there).
+    if (int(e->position().y()) >= viewContentHeight(this)) return;
     int x = e->position().x();
     // selection edges first
     if (hasSelection()) {

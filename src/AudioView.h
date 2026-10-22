@@ -5,6 +5,8 @@
 #include "AudioFile.h"
 #include "Types.h"
 
+class QScrollBar;
+
 // Visualization area: waveform/spectrogram with zoom, pan, playhead, markers, selection.
 class AudioView : public QWidget {
     Q_OBJECT
@@ -48,6 +50,9 @@ signals:
 public slots:
     void nudgeCursor(int deltaFrames);
 
+public:
+    static const int kScrollBarH;   // reserved bottom strip height for the scrollbar
+
 protected:
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *) override;
@@ -63,6 +68,7 @@ private:
     void rebuildBaseImage();
     enum DragKind { NoDrag, NewSelection, MoveSelStart, MoveSelEnd, MoveMarker, Pan };
     void applyZoom(double factor, int mouseX);
+    void syncScrollBar();          // keep the bottom scrollbar in step with view window
 
     const AudioData *audio_ = nullptr;
     const QVector<Marker> *markers_ = nullptr;
@@ -74,6 +80,9 @@ private:
     qint64 cursorFrame_ = 0;
     qint64 selStart_ = -1, selEnd_ = -1;
     int activeMarker_ = -1;
+
+    QScrollBar *scrollBar_ = nullptr;   // bottom horizontal scrollbar (visible when zoomed)
+    bool scrollSync_ = false;           // guard: programmatic setValue must not re-enter
 
     DragKind drag_ = NoDrag;
     int dragStartX_ = 0;
