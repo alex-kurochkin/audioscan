@@ -489,7 +489,13 @@ void MainWindow::buildUi() {
     connect(view_, &AudioView::markerClicked, this, &MainWindow::onMarkerClicked);
     connect(view_, &AudioView::markerMoved, this, [this](int, qint64) { persistMarkers(); });
     connect(view_, &AudioView::cursorMoved, this, [this](qint64 f) {
-        if (!player_.isPlaying() && audio_.valid)
+        // While playing/paused, a click inside the waveform seeks: playback
+        // jumps to the clicked position and continues from there.
+        if (player_.isPlaying() || player_.isPaused() || playProc_) {
+            seekPlaybackTo(f);
+            return;
+        }
+        if (audio_.valid)
             Database::instance().setSessionState(currentDir_, currentPath_,
                                                  double(f) / audio_.sampleRate);
     });
@@ -902,6 +908,38 @@ void MainWindow::stopPlayback() {
     fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
     playBtn_->setText(tr("Play"));
     view_->setPlayheadFrame(player_.currentFrame());
+}
+
+// Seek to a frame while playback is active, in whichever output path runs.
+// Called from the waveform click handler (AudioView::cursorMoved).
+void MainWindow::seekPlaybackTo(qint64 frame) {
+    if (!audio_.valid) return;
+    frame = std::clamp(frame, qint64(0), audio_.totalFrames - 1);
+
+    // In-process playback (Qt QAudioSink pull mode or pipe push-mode pump):
+    // jump the position and keep playing/paused state as it is.
+    if (player_.isPlaying() || player_.isPaused()) {
+        player_.seek(frame);
+        view_->setPlayheadFrame(frame);
+        return;
+    }
+
+    // External ffmpeg fallback process: restart it from the new position so
+    // playback continues there. The range end and loop flag are preserved.
+    if (playProc_) {
+        const bool loop = fbLooping_;
+        const qint64 end = fbEndFrame_;
+        stopFfmpegFallback();             // kills the proc, clears resume state
+        startFfmpegFallback(frame, end, loop);
+        if (playProc_) {
+            playBtn_->setText(tr("Pause"));
+            view_->setPlayheadFrame(frame);
+        } else {
+            playBtn_->setText(tr("Play"));
+            statusBar()->showMessage(tr("Seek failed (external player could not restart)"), 4000);
+        }
+        return;
+    }
 }
 
 // Keep the Play/Pause button in sync with the Qt sink state. The sink can

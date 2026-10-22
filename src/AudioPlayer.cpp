@@ -264,6 +264,40 @@ void AudioPlayer::resume() {
     }
 }
 
+void AudioPlayer::seek(qint64 frame) {
+    if (!buf_ || totalFrames_ == 0) return;
+    frame = std::clamp(frame, qint64(0), totalFrames_ - 1);
+    posFrames_ = frame;
+    if (!playing_ && !paused_) {
+        // No active session: just remember the position for the next resume.
+        emit positionChanged(posFrames_);
+        return;
+    }
+    if (qtSinkMode_ && sink_) {
+        // Pull mode: QAudioSink keeps its own ring buffer of already-fed PCM,
+        // so we must restart the stream to make the new position take effect
+        // immediately. Reuse the existing device when it is still open; after
+        // pause()/stop() it is closed and must be recreated (Qt Multimedia
+        // forbids reopening a QIODevice that was closed after start()).
+        if (!device_ || !device_->isOpen()) {
+            delete device_;
+            device_ = new FloatPcmDevice(this);
+            if (!device_->open(QIODevice::ReadOnly)) {
+                qWarning() << "AudioPlayer: cannot reopen PCM pull device on seek";
+                emit positionChanged(posFrames_);
+                return;
+            }
+        }
+        sink_->stop();
+        if (playing_) sink_->start(device_);   // paused: stay stopped, resume() restarts
+    } else if (outDevice_) {
+        // Push mode: drop the buffered-but-not-yet-written PCM so the jump is
+        // heard promptly; the timer pump simply feeds from the new position.
+        pumpBuf_.clear();
+    }
+    emit positionChanged(posFrames_);
+}
+
 void AudioPlayer::resumeOrStopToggle() {
     if (playing_) pause();
     else if (paused_) resume();
