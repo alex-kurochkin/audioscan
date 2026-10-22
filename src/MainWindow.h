@@ -91,6 +91,12 @@ private:
     void applyEditToRange(std::function<void()> op, const QString &type,
                           qint64 off, qint64 len,
                           const QVector<UndoRecord::MarkerDelta> &deltas = {});
+    // Re-read the on-disk metadata of the current file after a save and push
+    // it into the table row + preview cache (spec 2.4: every write invalidates
+    // that file's preview). Shared by edits and undo/redo so history steps keep
+    // the Preview column and Duration/SampleRate/etc. columns in sync with the
+    // disk state. Returns false if the current file is not present in the model.
+    bool refreshCurrentRowAfterSave();
     int currentRow() const;      // sorted/view row -> source row mapping handled internally
     int previewGeneration_ = 0;  // bumped on every mode switch/refresh: stale
                                  // worker results of an older generation are dropped,

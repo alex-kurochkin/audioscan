@@ -1098,6 +1098,46 @@ void MainWindow::doDeleteSelection() {
 
 // ---------------- undo / redo ----------------
 
+// Re-read the just-saved file's metadata and refresh its table row + preview.
+// Without this, undo/redo (and any edit save) leaves the Preview column and
+// Duration/Sample-Rate/etc. cells showing pre-edit values until a full rescan.
+bool MainWindow::refreshCurrentRowAfterSave() {
+    if (currentPath_.isEmpty()) return false;
+    auto rows = model_->rows();
+    int idx = -1;
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows[i].path == currentPath_) { idx = i; break; }
+    if (idx < 0) return false;
+
+    QFileInfo fi(currentPath_);
+    FileTableModel::Row &r = rows[idx];
+    r.size = fi.size();
+    r.modified = fi.lastModified();
+
+    AudioData meta;
+    QString perr;
+    if (AudioFile::probe(currentPath_, meta, &perr) && meta.valid) {
+        r.broken = false;
+        r.sampleRate = meta.sampleRate;
+        r.channels = meta.channels;
+        r.frames = meta.totalFrames;
+        r.sampleTypeName = meta.format == SampleFormat::Unknown
+            ? QStringLiteral("compressed") : sampleFormatName(meta.format);
+        r.comment = meta.comment;
+    } else {
+        r.broken = true;   // save produced an unreadable file: show it as broken
+    }
+
+    // Invalidate the cached preview image for this file and force a fresh
+    // render request (same policy as applyEditToRange, spec 2.4).
+    Database::instance().invalidatePreviewsForDir(currentDir_);
+    r.preview = QImage();
+    r.previewLoaded = false;
+    model_->updateRow(idx, r);
+    requestPreview(idx);
+    return true;
+}
+
 void MainWindow::undo() {
     const UndoRecord *rec = undoStack_.takeUndo();
     if (!rec || rec->filePath != currentPath_ || !audio_.valid) {
@@ -1132,8 +1172,13 @@ void MainWindow::undo() {
                   std::next(audio_.samples.begin(), rec->offset * ch));
     }
     player_.setBuffer(audio_.samples.data(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
-    if (!AudioFile::save(currentPath_, audio_, &err))
+    if (!AudioFile::save(currentPath_, audio_, &err)) {
         QMessageBox::warning(this, tr("Save failed"), err);
+    } else {
+        // Only sync the table when the disk actually changed — after a failed
+        // save the row must keep describing the untouched file.
+        refreshCurrentRowAfterSave();
+    }
     persistMarkers();
     view_->update();
 }
@@ -1178,8 +1223,13 @@ void MainWindow::redo() {
         }
     }
     player_.setBuffer(audio_.samples.data(), audio_.totalFrames, audio_.channels, audio_.sampleRate);
-    if (!AudioFile::save(currentPath_, audio_, &err))
+    if (!AudioFile::save(currentPath_, audio_, &err)) {
         QMessageBox::warning(this, tr("Save failed"), err);
+    } else {
+        // Keep the table row (metadata + preview) in sync with the re-written
+        // file — same rule as undo().
+        refreshCurrentRowAfterSave();
+    }
     persistMarkers();
     view_->update();
 }
