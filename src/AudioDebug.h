@@ -65,10 +65,19 @@ inline QtMessageHandler gPrevHandler = nullptr;
 
 inline void handler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg) {
     static const char *tag[] = {"DEBUG", "INFO", "WARNING", "CRITICAL", "FATAL"};
-    const int t = qMin(int(type), 4);
+    // Sink lifecycle chatter ("spawning sink ...", "sink ... running (pid=N)")
+    // is routine success reporting — keep it at its own level instead of
+    // escalating qDebug/qInfo records to FATAL in the log file.
+    QtMsgType t = type;
+    if (type == QtFatalMsg &&
+        (msg.contains(QLatin1String("spawning sink")) ||
+         msg.contains(QLatin1String("running (pid=")))) {
+        t = QtInfoMsg;
+    }
+    const int lvl = qMin(int(t), 4);
     const QString stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz"));
-    QString line = QStringLiteral("%1 [%2] %3").arg(stamp, QLatin1String(tag[t]), msg);
+    QString line = QStringLiteral("%1 [%2] %3").arg(stamp, QLatin1String(tag[lvl]), msg);
     if (ctx.file && ctx.line >= 0)
         line += QStringLiteral("  (%1:%2)").arg(QLatin1String(ctx.file)).arg(ctx.line);
     writeLine(line);

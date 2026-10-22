@@ -61,6 +61,14 @@ void AudioPlayer::setVolume(double v) {
 // playback position. Only meaningful while a session is active in pump mode.
 void AudioPlayer::restartOutputKeepingPosition() {
     if (!outDevice_ || qtSinkMode_) return;
+    // Legacy entry point kept for compatibility. Nothing calls it during
+    // live sessions any more: in-process volume scaling (generateBytes)
+    // made respawning the sink obsolete, and doing it per volume-slider
+    // move terminated aplay mid-write (SIGTERM -> "write error: Interrupted
+    // system call"). If it ever fires again, log it instead of silently
+    // killing the audio child.
+    qInfo() << "AudioPlayer: restarting output sink (legacy path) — this kills"
+            << "the running child process; report as a bug if seen during play";
     const bool wasPlaying = playing_;
     const bool wasPaused = paused_;
     if (!wasPlaying && !wasPaused) return;

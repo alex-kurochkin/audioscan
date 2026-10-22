@@ -718,13 +718,12 @@ void MainWindow::wirePlayerSignals() {
     connect(&player_, &AudioPlayer::loopStateChanged, this,
             [this](bool) { updatePlayButton(); });
 
-    // Live volume for push-mode outputs (aplay/ffplay pipe): those processes
-    // read their gain only at startup, so respawn them with the new value
-    // while keeping the playback position. Pull mode needs nothing: the PCM
-    // generator multiplies by the atomic volume_ on every chunk.
-    player_.setVolumeApplier([this](double) {
-        player_.restartOutputKeepingPosition();
-    });
+    // Volume needs no output restart any more: generateBytes() multiplies
+    // every PCM chunk by the atomic volume_ before it reaches the sink,
+    // for both the Qt path and the aplay/ffplay pipe. Respawning the child
+    // process per slider move was what killed aplay mid-write ("write
+    // error: Interrupted system call"), so the applier is now a no-op.
+    player_.setVolumeApplier([](double) {});
 }
 
 void MainWindow::requestPreview(int row) {
