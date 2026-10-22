@@ -339,8 +339,8 @@ void MainWindow::buildUi() {
     actSettings_ = tb->addAction(tr("Settings"));
 
     connect(actRefreshPrev_, &QAction::triggered, this, &MainWindow::refreshPreviewsForDir);
-    connect(actZoomIn_, &QAction::triggered, view_, &AudioView::zoomIn);
-    connect(actZoomOut_, &QAction::triggered, view_, &AudioView::zoomOut);
+    connect(actZoomIn_, &QAction::triggered, this, &MainWindow::zoomInPlayer);
+    connect(actZoomOut_, &QAction::triggered, this, &MainWindow::zoomOutPlayer);
     connect(actSettings_, &QAction::triggered, this, &MainWindow::showSettings);
     connect(tableModeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
         Settings::instance().setTablePreviewMode(idx == 1 ? QStringLiteral("spectrogram")
@@ -607,8 +607,8 @@ void MainWindow::buildUi() {
         view_->setMode(mode);
         displayToggleBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
     });
-    connect(zin, &QPushButton::clicked, view_, &AudioView::zoomIn);
-    connect(zout, &QPushButton::clicked, view_, &AudioView::zoomOut);
+    connect(zin, &QPushButton::clicked, this, &MainWindow::zoomInPlayer);
+    connect(zout, &QPushButton::clicked, this, &MainWindow::zoomOutPlayer);
 
     // ---- visualization area ----
     view_ = new AudioView(lowerPane);
@@ -1808,6 +1808,14 @@ void MainWindow::onMarkerClicked(int idx) {
     // inside the view's press handler), connected below.
     if (idx < 0 || idx >= markers_.size()) return;
     view_->setActiveMarkerIndex(idx);
+}
+
+void MainWindow::zoomInPlayer() {
+    if (view_) view_->zoomIn();
+}
+
+void MainWindow::zoomOutPlayer() {
+    if (view_) view_->zoomOut();
 }
 
 void MainWindow::openMarkerEditor(int idx) {
