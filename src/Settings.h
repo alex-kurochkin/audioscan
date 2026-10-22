@@ -5,6 +5,7 @@
 #include <QKeySequence>
 #include <QVariantMap>
 #include <QJsonObject>
+#include <QMap>
 
 // Static settings stored in ~/.config/<app>/config.json (plain JSON key/value).
 class Settings : public QObject {
@@ -43,6 +44,10 @@ public:
     // user's drag-reorder survives restarts even for currently hidden cols.
     QStringList columnOrder() const;
     void setColumnOrder(const QStringList &cols);
+    // Per-column widths (column key -> width in px). All column settings
+    // (visibility, order, widths) live in config.json.
+    QMap<QString, int> columnWidths() const;
+    void setColumnWidths(const QMap<QString, int> &widths);
 
     // Hotkeys: action id -> shortcut string (defaults if unset).
     QString shortcut(const QString &actionId) const;

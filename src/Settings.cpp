@@ -142,6 +142,24 @@ void Settings::setColumnOrder(const QStringList &cols) {
     emit changed();
 }
 
+QMap<QString, int> Settings::columnWidths() const {
+    QMap<QString, int> out;
+    const QJsonObject obj = value(QStringLiteral("columns/widths")).toJsonObject();
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        const int w = it.value().toInt();
+        if (w > 0) out.insert(it.key(), w);
+    }
+    return out;
+}
+
+void Settings::setColumnWidths(const QMap<QString, int> &widths) {
+    QJsonObject obj;
+    for (auto it = widths.begin(); it != widths.end(); ++it)
+        obj.insert(it.key(), it.value());
+    setValue(QStringLiteral("columns/widths"), obj);
+    emit changed();
+}
+
 QString Settings::defaultShortcut(const QString &id) const { return kDefaultHotkeys.value(id); }
 
 QString Settings::shortcut(const QString &actionId) const {

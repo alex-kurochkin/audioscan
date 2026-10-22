@@ -930,37 +930,48 @@ void MainWindow::applySavedColumnOrder() {
     }
 }
 
-// Read the per-column widths stored in the SQLite session table. Reloaded on
-// every call (cheap) so widths saved by the Columns dialog mid-run are picked
-// up immediately; the DB does not change while we are running otherwise.
+// Read the per-column widths from config.json (all column settings live
+// there). Reloaded on every call (cheap) so widths saved by the Columns
+// dialog mid-run are picked up immediately. Widths previously stored in the
+// SQLite session table (older builds) are migrated once on the first load.
 void MainWindow::loadColumnWidths() {
-    const QString json = Database::instance().sessionValue(QStringLiteral("colWidths"));
-    if (json.isEmpty()) return;
-    const QJsonObject obj = QJsonDocument::fromJson(json.toUtf8()).object();
-    for (auto it = obj.begin(); it != obj.end(); ++it) {
-        bool ok = false;
-        const int col = it.key().toInt(&ok);
-        const int w = it.value().toInt();
-        if (ok && col >= 0 && col < int(FileTableModel::ColCount) && w > 0)
-            colWidths_.insert(col, w);
+    const QMap<QString, int> map = Settings::instance().columnWidths();
+    for (auto it = map.begin(); it != map.end(); ++it) {
+        const int col = FileTableModel::columnFromKey(it.key());
+        if (col >= 0 && col < int(FileTableModel::ColCount) && it.value() > 0)
+            colWidths_.insert(col, it.value());
+    }
+    if (firstWidthLoad_) {
+        firstWidthLoad_ = false;
+        const QString legacy = Database::instance().sessionValue(QStringLiteral("colWidths"));
+        if (!legacy.isEmpty()) {
+            const QJsonObject obj = QJsonDocument::fromJson(legacy.toUtf8()).object();
+            QMap<QString, int> merged = Settings::instance().columnWidths();
+            for (auto it = obj.begin(); it != obj.end(); ++it) {
+                const int col = it.key().toInt();
+                const int w = it.value().toInt();
+                if (w > 0 && col >= 0 && col < int(FileTableModel::ColCount))
+                    merged.insert(FileTableModel::columnKey(col), w);
+            }
+            Settings::instance().setColumnWidths(merged);
+            Database::instance().setSessionValue(QStringLiteral("colWidths"), QString());
+        }
     }
 }
 
-// Persist the current width of every visible column to the SQLite session
-// table so user-resized columns keep their size across restarts.
+// Persist the current width of every visible column into config.json so
+// user-resized columns keep their size across restarts.
 void MainWindow::saveColumnWidths() {
     if (!table_ || !model_) return;
     auto *hdr = table_->horizontalHeader();
     const auto &visCols = model_->visibleColumns();
-    QJsonObject obj;
+    QMap<QString, int> map = Settings::instance().columnWidths();
     for (int log = 0; log < visCols.size(); ++log) {
         if (hdr->isSectionHidden(log)) continue;
-        obj.insert(QString::number(visCols[log]),
+        map.insert(FileTableModel::columnKey(visCols[log]),
                    table_->columnWidth(log));
     }
-    Database::instance().setSessionValue(
-        QStringLiteral("colWidths"),
-        QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+    Settings::instance().setColumnWidths(map);
 }
 
 // ---------------- hotkeys ----------------
