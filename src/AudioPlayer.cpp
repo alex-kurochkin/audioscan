@@ -1,6 +1,7 @@
 #include "AudioPlayer.h"
 
 #include "AudioDebug.h"
+#include "ProcessSink.h"
 
 #include <QAudioSink>
 #include <QAudioFormat>
@@ -413,6 +414,18 @@ void AudioPlayer::pause() {
     paused_ = true;
     if (pump_) pump_->stop();
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
+    // Push mode: freeze the in-flight PCM too. Without this, up to ~64 KiB
+    // of audio already sitting in the aplay child's stdin pipe keeps
+    // playing after pause ("Stop/pause is silent only seconds later"), and
+    // resume would then continue from posFrames_ while stale bytes from the
+    // pre-pause position had just been heard. The child respawns lazily on
+    // the next write (resume()), so it also releases the ALSA device while
+    // paused — other apps can use it.
+    if (!qtSinkMode_ && outDevice_) {
+        pumpBuf_.clear();
+        if (auto *ps = qobject_cast<ProcessSink *>(outDevice_))
+            ps->flushPipe();
+    }
 }
 
 void AudioPlayer::resume() {
@@ -473,6 +486,13 @@ void AudioPlayer::seek(qint64 frame) {
         // Push mode: drop the buffered-but-not-yet-written PCM so the jump is
         // heard promptly; the timer pump simply feeds from the new position.
         pumpBuf_.clear();
+        // Also flush everything already handed to the external sink process:
+        // its stdin pipe holds up to ~64 KiB of stale PCM from the OLD
+        // position, which aplay would otherwise keep playing for hundreds of
+        // milliseconds after the seek ("cursor moved, sound lags behind").
+        // The ProcessSink respawns the child lazily on the next write.
+        if (auto *ps = qobject_cast<ProcessSink *>(outDevice_))
+            ps->flushPipe();
     }
     emit positionChanged(posFrames_);
 }
@@ -487,7 +507,18 @@ void AudioPlayer::stop() {
     const bool hadSession = playing_ || paused_;
     if (pump_) pump_->stop();
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
-    if (outDevice_) { outDevice_->close(); delete outDevice_; outDevice_ = nullptr; }
+    if (outDevice_) {
+        // Stop must be *instantly* silent: close() only sends EOF, letting
+        // aplay keep draining everything buffered in the pipe — audible for
+        // up to ~64 KiB (~0.37 s) after the button press. Flush first, then
+        // close/delete as usual.
+        if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
+            ps->flushPipe();
+            ps->waitForBytesWritten(50);  // nothing left queued after flush; no-op guard
+        }
+        pumpBuf_.clear();
+        outDevice_->close(); delete outDevice_; outDevice_ = nullptr;
+    }
     playing_ = false;
     paused_ = false;
     emit loopStateChanged(isLoopActive());   // session over: loop is no longer active

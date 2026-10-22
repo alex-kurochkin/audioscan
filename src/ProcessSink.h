@@ -11,6 +11,7 @@
 // via a QProcess-backed QIODevice. QAudioSink accepts any QIODevice that
 // supports write, so this keeps playback working even in bare environments.
 class ProcessSink : public QIODevice {
+    Q_OBJECT
 public:
     explicit ProcessSink(const QString &program, const QStringList &args,
                          QObject *parent = nullptr);
@@ -20,6 +21,12 @@ public:
     // the same object identity (AudioPlayer deletes this device only when it
     // replaces it). The next writeData() respawns lazily with newArgs.
     void restartWithArgs(const QStringList &newArgs);
+
+    // Discard all not-yet-flushed bytes and force the child to stop feeding
+    // stale PCM (used on seek/stop so a position jump is heard immediately).
+    void flushPipe();
+    // Bytes accepted by write() but still queued for the child's stdin.
+    qint64 discardBuffered();
 
 protected:
     qint64 readData(char *, qint64) override;
@@ -36,8 +43,9 @@ private:
     QString program_;
     QStringList args_;
     QProcess *proc_ = nullptr;
-    bool started_ = false;   // child was successfully spawned at least once
-    bool finishing_ = false; // EOF sent; deferred SIGTERM escalation armed
+    bool started_ = false;     // child was successfully spawned at least once
+    bool finishing_ = false;   // EOF sent; deferred SIGTERM escalation armed
+    bool flushedRecently_ = false; // last spawn followed flushPipe(): warm start
 };
 
 // Build the "aplay" raw-PCM argument list for a format. The volume parameter

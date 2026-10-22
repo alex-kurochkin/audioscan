@@ -68,6 +68,33 @@ void ProcessSink::restartWithArgs(const QStringList &newArgs) {
 
 qint64 ProcessSink::readData(char *, qint64) { return 0; }
 
+qint64 ProcessSink::discardBuffered() {
+    // Bytes that were accepted by write() but not yet flushed into the
+    // child's stdin pipe — stale audio from before a seek/stop.
+    return proc_ ? proc_->bytesToWrite() : 0;
+}
+
+void ProcessSink::flushPipe() {
+    // Drop everything the pump has already handed to the child's stdin pipe.
+    // A seek must be heard at once: without this, QProcess's internal buffer
+    // plus the kernel pipe (typically ~64 KiB ≈ 0.37 s of S16 stereo @44.1k)
+    // keep feeding stale PCM from the OLD position into aplay even after the
+    // player reset posFrames_ — exactly the "cursor moved but the sound
+    // catches up slowly / Stop keeps playing for a while" symptom. The bytes
+    // still queued in ALSA's own ring inside aplay are short (~period size)
+    // and unavoidable without killing the process.
+    if (!proc_) return;
+    if (proc_->state() == QProcess::Running) {
+        proc_->closeWriteChannel();     // EOF: aplay drains and exits cleanly
+        if (!proc_->waitForFinished(500))
+            proc_->terminate();         // escalation only if it lingers
+    }
+    delete proc_;                        // reap synchronously; no orphan
+    proc_ = nullptr;
+    started_ = false;                    // ensureStarted() respawns lazily
+    flushedRecently_ = true;             // next spawn is "warm": skip stderr wait
+}
+
 qint64 ProcessSink::writeData(const char *data, qint64 len) {
     if (!ensureStarted()) return -1;
     // A child that is blocked in snd_pcm_writei() (device underrun/busy) can
@@ -160,8 +187,17 @@ bool ProcessSink::ensureStarted() {
     }
     // Drain any early stderr the child produced while opening the device and
     // echo it once — this is usually the exact ALSA error we're debugging.
-    {
+    // The 150 ms wait only applies to a *cold* spawn (first start of the
+    // session). After flushPipe() (seek/stop) the respawn must be immediate:
+    // waiting here on every seek would add audible latency, and a warm aplay
+    // that already opened the device successfully has nothing new to say.
+    if (!flushedRecently_) {
         proc_->waitForReadyRead(150);
+    } else {
+        flushedRecently_ = false;
+        proc_->waitForStarted(100);
+    }
+    {
         const QByteArray se = proc_->readAllStandardError();
         if (!se.trimmed().isEmpty())
             qWarning().noquote()
