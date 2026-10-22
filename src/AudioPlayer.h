@@ -72,6 +72,13 @@ public:
     // End of the active/last playback range (selection end or file end).
     qint64 endFrame() const { return loopEnd_; }
 
+    // Live retargeting of the *repeat* boundary without restarting audio.
+    // MainWindow uses this when Loop is toggled during a session: the loop
+    // must repeat exactly the range the current session plays (selection if
+    // any, otherwise the whole file) — never a boundary left over from an
+    // earlier session or seek. Returns true if an active session exists.
+    bool setLoopRange(qint64 start, qint64 end);
+
 signals:
     void positionChanged(qint64 frame);
     void finished();
@@ -120,6 +127,10 @@ private:
 
     qint64 posFrames_ = 0;       // current playback position (kept after Stop)
     qint64 startFrames_ = 0;     // where the last Play session began (resume point)
+    // Repeat boundary of the active session. Normally equals the session
+    // range [sessStart_, sessEnd_]; a live Loop toggle may retarget it via
+    // setLoopRange() so looping repeats exactly the selection-or-whole-file
+    // range — never a stale end left over from an earlier seek or session.
     qint64 loopStart_ = 0, loopEnd_ = 0;
     // Session range as it was when audio actually started. A live seek may
     // retarget loopEnd_/startFrames_ (clicking outside the range while

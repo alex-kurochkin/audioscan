@@ -494,18 +494,32 @@ void MainWindow::buildUi() {
         const qint64 rangeEnd   = hasSel ? selEnd : audio_.totalFrames;
 
         if (player_.isPlaying() || player_.isPaused()) {
-            // Re-arm the *selection-or-whole-file* range (not whatever range
-            // the last session happened to use), then toggle the loop flag.
-            const qint64 cur = std::clamp(view_->playheadFrame(), rangeStart, rangeEnd - 1);
-            player_.play(rangeStart, rangeEnd, on);
-            player_.seek(cur);
-            return;   // Qt sink loops internally from here on
+            // Loop never invents its own repeat start: the repeat range is
+            // exactly what the session plays — selection if any, otherwise
+            // the whole file. Retarget only the loop boundary in place; do
+            // NOT restart the output (that used to drop a chunk of already
+            // buffered audio and re-open the device — audible glitch) and do
+            // NOT touch the play-start point (Stop must still rewind there).
+            const qint64 cur = view_->playheadFrame();
+            if (player_.setLoopRange(rangeStart, rangeEnd)) {
+                player_.setLooping(on);
+                if (cur < rangeStart || cur >= rangeEnd) {
+                    // Playhead outside the new repeat range: jump it back in.
+                    seekingPlayback_ = true;   // programmatic move: no re-seek
+                    player_.seek(rangeStart);
+                    view_->setPlayheadFrame(player_.currentFrame());
+                    seekingPlayback_ = false;
+                }
+            }
+            updatePlayButton();   // keep the Loop highlight in sync right now
+            return;               // Qt sink loops internally from here on
         }
         if (playProc_) {
             // ffmpeg fallback is running: restart it over the same range with
             // the new loop flag, resuming from the current playhead position.
             qint64 cur = view_->playheadFrame();
             if (cur < rangeStart || cur >= rangeEnd) cur = rangeStart;
+            seekingPlayback_ = true;         // process restart moves the cursor
             stopFfmpegFallback();
             wasPlaying_ = true;          // keep the session alive across restart
             startFfmpegFallback(rangeStart, rangeEnd, on);
@@ -515,6 +529,7 @@ void MainWindow::buildUi() {
             } else {
                 playBtn_->setText(tr("Play"));
             }
+            seekingPlayback_ = false;
         }
         // Stopped: nothing to restart — the next Play picks up the loop flag
         // and computes the same selection-or-whole-file range itself.
@@ -593,6 +608,7 @@ void MainWindow::buildUi() {
             lastPlayStartFrame_ = player_.startFrame();  // keep resume point in sync
             seekingPlayback_ = false;
         }
+        updatePlayButton();   // session over: drop any stale Pause/Loop styling
     });
     // Safety net: whenever the Qt sink state changes (finish, device error,
     // external stop), sync the button so it never sticks on "Pause".
@@ -1248,16 +1264,22 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
                     .arg(code).arg(status == QProcess::CrashExit ? "CrashExit" : "NormalExit"));
                 if (status == QProcess::CrashExit || code != 0) {
                     statusBar()->showMessage(tr("Playback failed (external player error)"), 5000);
-                } else if (fbLooping_) {
-                    // Loop: restart the range when the clip ends.
+                } else if (fbLooping_ && loopBtn_->isChecked()) {
+                    // Loop: restart the range when the clip ends. The button
+                    // check is re-read at this moment, so un-checking Loop
+                    // while the tail plays stops the session for good instead
+                    // of restarting it one more time.
                     QTimer::singleShot(30, this, [this] {
                         if (wasPlaying_) return;
+                        seekingPlayback_ = true;   // restart moves the cursor
                         view_->setPlayheadFrame(fbStartFrame_);
                         startFfmpegFallback(fbStartFrame_, fbEndFrame_, true);
+                        seekingPlayback_ = false;
                     });
                     return;
                 }
                 if (playBtn_) playBtn_->setText(tr("Play"));
+                updatePlayButton();   // fallback session over: sync Pause/Loop styling
             });
     // ffmpeg writes directly to the ALSA "default" device, which resolves to
     // whatever output is configured in the system sound settings — no need to

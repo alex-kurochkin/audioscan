@@ -82,6 +82,25 @@ void AudioPlayer::setLooping(bool on) {
     emit loopStateChanged(isLoopActive());
 }
 
+// Retarget the repeat boundary of a live session without restarting audio.
+// Only the loop range moves: the play-start point (startFrames_) and the
+// session range stay untouched, so Stop still rewinds to where playback
+// actually began and a non-looped resume keeps using the original boundaries.
+bool AudioPlayer::setLoopRange(qint64 start, qint64 end) {
+    if (!playing_ && !paused_) return false;
+    start = std::clamp(start, qint64(0), totalFrames_ - 1);
+    if (end <= start || end > totalFrames_) end = totalFrames_;
+    loopStart_ = start;
+    loopEnd_ = end;
+    // If the audible position already passed the new repeat end (e.g. the
+    // selection shrank while playing), snap back so the repeat starts now.
+    if (posFrames_ >= loopEnd_ || posFrames_ < loopStart_) {
+        posFrames_ = loopStart_;
+        emit positionChanged(posFrames_);
+    }
+    return true;
+}
+
 void AudioPlayer::setBuffer(const float *data, qint64 totalFrames, int channels, int sampleRate) {
     stop();
     buf_ = data;
