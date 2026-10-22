@@ -453,6 +453,14 @@ void MainWindow::buildUi() {
     connect(prevBtn, &QPushButton::clicked, this, &MainWindow::prevFile);
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
 
+    // ---- visualization area ----
+    // MUST be created before the playback controllers below: pc_->setContext()
+    // captures view_ by value. Wiring the controller while view_ is still null
+    // makes every play/pause/seek/loop entry point hit its unwired-context
+    // guard and bail out silently — "Play does nothing".
+    view_ = new AudioView(lowerPane);
+    lowerLay->addWidget(view_, 1);
+
     // ---- playback controllers (extracted from this class) ----
     // The ffmpeg fallback talks to the UI through plain function providers so
     // it never needs to know about widgets; PlayerController owns the
@@ -503,9 +511,7 @@ void MainWindow::buildUi() {
         displayToggleBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
     });
 
-    // ---- visualization area ----
-    view_ = new AudioView(lowerPane);
-    lowerLay->addWidget(view_, 1);
+    // ---- visualization area (widget created above, before the controllers)
     mainSplit->addWidget(lowerPane);
     mainSplit->setSizes({520, 340});
     mainSplit->setCollapsible(0, false);
