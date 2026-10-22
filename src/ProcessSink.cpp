@@ -102,8 +102,13 @@ QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
 QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
     QStringList args;
     // NOTE: ffplay has no -autoexit option; it exits on EOF of stdin input.
+    // The pump always feeds signed 16-bit PCM (see AudioPlayer::play()), so
+    // declare s16le — f32le here turned the stream into garbage noise.
+    const QString sf = fmt.sampleFormat() == QAudioFormat::Float
+                           ? QStringLiteral("f32le")
+                           : QStringLiteral("s16le");
     args << "-nodisp" << "-loglevel" << "quiet"
-         << "-f" << "f32le"
+         << "-f" << sf
          << "-ar" << QString::number(fmt.sampleRate())
          << "-ac" << QString::number(fmt.channelCount())
          << "-i" << "-";

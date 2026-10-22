@@ -1,5 +1,7 @@
 #include "AudioPlayer.h"
 
+#include "AudioDebug.h"
+
 #include <QAudioSink>
 #include <QAudioFormat>
 #include <QMediaDevices>
@@ -7,6 +9,30 @@
 #include <QTimer>
 #include <cstring>
 #include <algorithm>
+
+namespace {
+// Qt Multimedia on Ubuntu/Kubuntu (24.04 and later, incl. 25.10) is built
+// against the LGPL/GPL-redistributed FFmpeg. Merely instantiating a media
+// object (QAudioSink included) makes the ffmpeg backend print
+//   "Using Qt multimedia with FFmpeg version ... GPL version 2 or later"
+// through qFatal() — which ABORTS the process in debug/default builds. In
+// release builds it only logs, but relying on that is fragile: an abort
+// during play() kills both the Qt sink path and any fallback that has not
+// started yet. So we never touch QAudioSink unless the environment says the
+// crash-on-construction bug is absent (QT_MEDIA_BACKEND=ffmpeg/null/waveout)
+// or the user explicitly forces the Qt path (AUDIOSCOUT_QTSINK=1).
+bool qtMultimediaUnsafeEnv() {
+    static const bool unsafe = [] {
+        const QByteArray forced = qgetenv("AUDIOSCOUT_QTSINK").trimmed();
+        if (!forced.isEmpty() && forced != "0") return false;   // user override
+        const QByteArray backend = qgetenv("QT_MEDIA_BACKEND").trimmed().toLower();
+        if (!backend.isEmpty())
+            return backend == "ffmpeg";   // explicit ffmpeg backend still crashes
+        return true;                      // unset/unknown: assume the broken build
+    }();
+    return unsafe;
+}
+}  // namespace
 
 AudioPlayer::FloatPcmDevice::FloatPcmDevice(AudioPlayer *owner)
     : QIODevice(owner), owner_(owner) {}
@@ -54,7 +80,14 @@ void AudioPlayer::restartOutputKeepingPosition() {
         emit finished();
     };
     if (!sinkFactory_) { volumeApplierBusy_ = false; failSession(); return; }
-    outDevice_ = sinkFactory_(outFmt_);
+    // Always respawn the pipe as S16: the sink processes (aplay -f S16_LE,
+    // ffplay s16le) consume signed 16-bit PCM and generateBytes() must emit
+    // matching bytes — a stale Float outFmt_ here produced float data in an
+    // S16 stream (distorted/silent audio after any volume-slider move).
+    QAudioFormat fmt = outFmt_;
+    fmt.setSampleFormat(QAudioFormat::Int16);
+    outDevice_ = sinkFactory_(fmt);
+    outFmt_ = fmt;
     if (!outDevice_) {
         qWarning() << "AudioPlayer: sink factory returned null on volume restart";
         volumeApplierBusy_ = false;
@@ -127,8 +160,26 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     sink_ = nullptr;
     if (outDevice_) { outDevice_->close(); delete outDevice_; outDevice_ = nullptr; }
 
-    // Preferred path: real QAudioSink on the default output device.
-    const QAudioDevice dev = QMediaDevices::defaultAudioOutput();
+    // Preferred path: real QAudioSink on the default output device — but only
+    // when constructing one is safe (see qtMultimediaUnsafeEnv above). On
+    // Ubuntu/Kubuntu's ffmpeg-backed Qt Multimedia we skip it entirely and go
+    // straight to the ALSA pipe sinks below, so playback never dies on the
+    // backend's qFatal banner.
+    const bool qtSafe = !qtMultimediaUnsafeEnv();
+    const QAudioDevice dev = qtSafe ? QMediaDevices::defaultAudioOutput()
+                                    : QAudioDevice{};
+    if (qtSafe && !firstPlayDiag_) {
+        firstPlayDiag_ = true;
+        const QAudioFormat pref = dev.preferredFormat();
+        DBG(QStringLiteral("Qt sink probe: default out device='%1' float=%2 int16=%3 preferred=%4Hz/%5ch/sf=%6")
+            .arg(dev.description().isEmpty() ? QStringLiteral("<none>") : dev.description())
+            .arg(dev.isFormatSupported(fmt) ? "yes" : "no")
+            .arg([&] { QAudioFormat f16 = fmt; f16.setSampleFormat(QAudioFormat::Int16);
+                       return dev.isFormatSupported(f16) ? "yes" : "no"; }())
+            .arg(pref.sampleRate())
+            .arg(pref.channelCount())
+            .arg(int(pref.sampleFormat())));
+    }
     bool useQtSink = false;
     if (!dev.isNull() && dev.isFormatSupported(fmt)) {
         sink_ = new QAudioSink(dev, fmt, this);
@@ -148,9 +199,18 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     // Fallback path installed by MainWindow: the factory returns an already
     // opened write-only QIODevice (a pipe to "aplay"/"ffplay"). We push PCM
     // chunks into it from a timer-driven pump instead of using QAudioSink.
+    // This is also the PRIMARY path on systems where Qt Multimedia aborts on
+    // sink construction, so pick the format the pipe actually wants here.
     if (!useQtSink && sinkFactory_) {
-        outDevice_ = sinkFactory_(fmt);
-        outFmt_ = fmt;
+        if (!qtSafe)
+            DBG("Qt sink skipped: known-unsafe ffmpeg-backed Qt Multimedia build, using ALSA pipe sink");
+        // The aplay/ffplay pipes always consume signed 16-bit PCM: request
+        // that format up front. Leaving Float here makes generateBytes()
+        // emit float bytes into an S16 stream — audible garbage/silence.
+        QAudioFormat pipeFmt = fmt;
+        pipeFmt.setSampleFormat(QAudioFormat::Int16);
+        outDevice_ = sinkFactory_(pipeFmt);
+        outFmt_ = pipeFmt;
     }
     if (!useQtSink && !outDevice_) {
         qWarning() << "AudioPlayer: no usable audio output (device null and no fallback)";
@@ -158,12 +218,17 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     }
 
     // Recreate the pull device for every play session (a fresh QIODevice
-    // must be opened before being handed to QAudioSink::start()).
-    delete device_;
-    device_ = new FloatPcmDevice(this);
-    if (!device_->open(QIODevice::ReadOnly)) {
-        qWarning() << "AudioPlayer: cannot open PCM pull device";
-        return;
+    // must be opened before being handed to QAudioSink::start()). Pull mode
+    // needs it; push mode writes through outDevice_ directly.
+    if (useQtSink) {
+        delete device_;
+        device_ = new FloatPcmDevice(this);
+        if (!device_->open(QIODevice::ReadOnly)) {
+            qWarning() << "AudioPlayer: cannot open PCM pull device";
+            delete sink_; sink_ = nullptr;
+            useQtSink = false;   // caller falls back via the watchdog anyway
+            return;
+        }
     }
 
     startFrames_ = startFrame;

@@ -80,12 +80,24 @@ bool FfmpegFallbackController::start(qint64 startFrame, qint64 endFrame, bool lo
     }
 
     proc_ = new QProcess(this);
+    // Keep the raw ALSA/stderr output around: ffmpeg writes device errors
+    // right before exiting, and they must still be readable in finished().
+    proc_->setProcessChannelMode(QProcess::SeparateChannels);
     connect(proc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus status) {
-                if (proc_) { proc_->deleteLater(); proc_ = nullptr; }
+                QString errTail;
+                if (proc_) {
+                    errTail = QString::fromUtf8(proc_->readAllStandardError()).trimmed();
+                    proc_->deleteLater(); proc_ = nullptr;
+                }
                 if (playheadTimer_) playheadTimer_->stop();
                 QFile::remove(tmpPath_);
                 tmpPath_.clear();
+                // ALSA device errors from ffmpeg surface here on the error
+                // channel right before exit — log them so "fallback died"
+                // is diagnosable without strace.
+                if (!errTail.isEmpty())
+                    DBG(QStringLiteral("ffmpeg stderr (final): %1").arg(errTail));
                 if (!wasPlaying_) return;      // stopped/paused intentionally
                 wasPlaying_ = false;
                 DBG(QStringLiteral("external player finished: exitCode=%1 status=%2")

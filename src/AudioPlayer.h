@@ -142,5 +142,6 @@ private:
     bool playing_ = false;
     bool paused_ = false;        // paused mid-playback, resumable from posFrames_
     bool qtSinkMode_ = false;    // true: QAudioSink pull mode; false: timer pump
+    bool firstPlayDiag_ = false; // one-time device-capability log on first play()
     std::atomic<double> volume_{0.8};
 };
