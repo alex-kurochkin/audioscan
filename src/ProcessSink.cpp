@@ -69,7 +69,18 @@ qint64 ProcessSink::writeData(const char *data, qint64 len) {
     return len;
 }
 
-void ProcessSink::close() { shutdown(); }
+void ProcessSink::close() {
+    // Graceful EOF: close only our write channel so the child drains whatever
+    // is already buffered in the pipe and exits 0 on its own (that is how a
+    // healthy end-of-playback looks to aplay). We must NOT terminate()/kill()
+    // here: SIGTERM/SIGKILL interrupts aplay's blocking snd_pcm_writei() and
+    // produces the bogus "write error: Interrupted system call" + exitCode=1
+    // that previously showed up as an alarming FATAL log line after every
+    // stop/pause. The process itself is reaped later in shutdown() (destructor
+    // or the next play session), which by then sees a clean NormalExit/0.
+    if (!proc_) return;
+    if (proc_->state() == QProcess::Running) proc_->closeWriteChannel();
+}
 
 bool ProcessSink::ensureStarted() {
     if (proc_) {
@@ -131,13 +142,21 @@ void ProcessSink::shutdown() {
     // otherwise a mid-stream death looks like "playback silently stopped".
     if (proc_->state() == QProcess::NotRunning && started_) {
         const QByteArray se = proc_->readAllStandardError();
-        // Closing our write channel is how a healthy run ends (aplay sees EOF
-        // and exits 0); only non-zero/crash exits or stderr output are news.
+        // Closing our write channel is how a healthy run ends: aplay sees EOF
+        // and exits 0. Two benign cases must NOT be logged as warnings:
+        //  * clean exit (code 0, no stderr);
+        //  * the -EINTR unwind after closeWriteChannel(): ALSA's blocking
+        //    snd_pcm_writei() returns EINTR when the pipe's write end closes,
+        //    so aplay prints "write error: Interrupted system call" and exits
+        //    1. That is our own graceful shutdown signature, not a failure.
+        const bool eintrUnwind =
+            se.contains("Interrupted system call") || se.contains("EINTR");
         const bool noteworthy =
-            se.trimmed().isEmpty()
+            !eintrUnwind &&
+            (se.trimmed().isEmpty()
                 ? (proc_->exitStatus() == QProcess::CrashExit ||
                    proc_->exitCode() != 0)
-                : true;
+                : true);
         if (noteworthy)
             qWarning().noquote()
                 << QStringLiteral("AudioPlayer: sink '%1' already exited"
@@ -153,17 +172,22 @@ void ProcessSink::shutdown() {
                                       QString::fromUtf8(se).trimmed()));
     }
     proc_->closeWriteChannel();
-    proc_->waitForFinished(300);
-    if (proc_->state() == QProcess::Running) {
-        // SIGTERM first, then a *long* grace period: aplay blocks in
-        // snd_pcm_writei() waiting for our pipe data; when the write end
-        // closes that call returns -EINTR ("write error: Interrupted system
-        // call") and aplay exits 1 on its own within a few tens of ms. The
-        // previous 300 ms wait expired too early on loaded machines and we
-        // escalated to SIGKILL while the child was already unwinding ALSA —
-        // leaving the PCM device busy for the next spawn.
-        proc_->terminate();
-        if (!proc_->waitForFinished(2000)) proc_->kill();
+    // Give aplay time to drain the remaining pipe bytes through ALSA and exit
+    // cleanly on its own. The wait happens in the event loop via a queued
+    // re-check (shutdown() may be called from a destructor during teardown,
+    // when blocking here would be unsafe anyway), then we only escalate to
+    // SIGTERM if the child is *still* alive — which after EOF basically never
+    // happens, so healthy stop/seek no longer interrupts snd_pcm_writei().
+    if (!finishing_) {
+        finishing_ = true;
+        QPointer<ProcessSink> self(this);
+        QTimer::singleShot(1500, this, [self] {
+            if (!self || !self->proc_) return;
+            if (self->proc_->state() == QProcess::Running) {
+                self->proc_->terminate();
+                if (!self->proc_->waitForFinished(2000)) self->proc_->kill();
+            }
+        });
     }
 }
 

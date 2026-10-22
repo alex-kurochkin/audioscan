@@ -1,8 +1,10 @@
 #pragma once
 #include <QAudioFormat>
 #include <QIODevice>
+#include <QPointer>
 #include <QProcess>
 #include <QStringList>
+#include <QTimer>
 
 // Fallback sinks: when Qt Multimedia has no usable audio output device
 // (missing PulseAudio/PipeWire plugins), pipe raw PCM to an external player
@@ -31,6 +33,7 @@ private:
     QStringList args_;
     QProcess *proc_ = nullptr;
     bool started_ = false;   // child was successfully spawned at least once
+    bool finishing_ = false; // EOF sent; deferred SIGTERM escalation armed
 };
 
 // Build the "aplay" raw-PCM argument list for a format. The volume parameter
