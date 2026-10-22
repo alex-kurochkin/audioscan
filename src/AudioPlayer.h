@@ -40,7 +40,9 @@ public:
     bool isPaused() const { return paused_; }
 
     // Volume is read by the audio callback thread, so it must be atomic.
-    void setVolume(double v) { volume_.store(v); }   // internal gain 0..1
+    // setVolume also notifies the output owner (volumeApplier_) so devices
+    // with startup-fixed gain (e.g. the "aplay" pipe fallback) can react.
+    void setVolume(double v);
     double volume() const { return volume_.load(); }
     // Live volume changes must be applied to the already-created output
     // device too: aplay reads its own -volume argument at startup, so the
@@ -49,7 +51,9 @@ public:
     void setVolumeApplier(VolumeApplier f) { volumeApplier_ = std::move(f); }
 
     // Toggle loop of the current playback range live (while playing).
-    void setLooping(bool on) { looping_ = on; }
+    // Changing the flag mid-session emits loopStateChanged so the UI can
+    // keep the Loop button highlight in sync with actual loop activity.
+    void setLooping(bool on);
     bool isLooping() const { return looping_; }
     // Loop state that actually drives audible repetition right now: true only
     // while a session is active AND looping is armed. The UI uses this to
@@ -62,6 +66,9 @@ public:
 signals:
     void positionChanged(qint64 frame);
     void finished();
+    // Emitted whenever audible looping starts/stops (play/stop/pause-toggle
+    // of the loop flag), so the UI can reflect real loop activity.
+    void loopStateChanged(bool active);
 
 private:
     class FloatPcmDevice : public QIODevice {   // pull-mode source feeding QAudioSink

@@ -421,23 +421,28 @@ void MainWindow::buildUi() {
     auto *nextBtn = new QPushButton(tr(">|"), playerBar);
     loopBtn_ = new QPushButton(tr("Loop"), playerBar);
     loopBtn_->setCheckable(true);
-    // Highlight the button while looping is active.
+    // The highlight must track *actual* loop activity (armed AND a session is
+    // running), not the checked state: an armed-but-idle Loop stays unlit.
     {
-        QPalette pal = loopBtn_->palette();
+        QPalette lit = loopBtn_->palette();
         const QColor accent(70, 130, 220);
-        pal.setColor(QPalette::Button, accent);
-        pal.setColor(QPalette::ButtonText, Qt::white);
-        pal.setColor(QPalette::Highlight, accent.darker(120));
-        loopBtn_->setAutoFillBackground(true);
-        loopBtn_->setPalette(pal);
+        lit.setColor(QPalette::Button, accent);
+        lit.setColor(QPalette::ButtonText, Qt::white);
+        lit.setColor(QPalette::Highlight, accent.darker(120));
+        loopBtn_->setProperty("litPalette", QVariant::fromValue(lit));
+        loopBtn_->setProperty("basePalette", QVariant::fromValue(loopBtn_->palette()));
     }
     volumeSlider_ = new QSlider(Qt::Horizontal, playerBar);
     volumeSlider_->setRange(0, 100);
     volumeSlider_->setValue(int(Settings::instance().volume() * 100));
     volumeSlider_->setFixedWidth(140);
-    playerModeCombo_ = new QComboBox(playerBar);
-    playerModeCombo_->addItems({tr("Waveform"), tr("Spectrogram")});
-    playerModeCombo_->setCurrentIndex(Settings::instance().playerMode() == QLatin1String("spectrogram") ? 1 : 0);
+    // Single toggle button instead of a Waveform/Spectrogram dropdown: one
+    // click switches the display mode; the label shows the current mode.
+    displayToggleBtn_ = new QToolButton(playerBar);
+    displayToggleBtn_->setText(Settings::instance().playerMode() == QLatin1String("spectrogram")
+                                   ? tr("Spectrogram") : tr("Waveform"));
+    displayToggleBtn_->setToolTip(tr("Click to switch between Waveform and Spectrogram"));
+    displayToggleBtn_->setAutoRaise(false);
     auto *zin = new QPushButton(tr("Zoom +"), playerBar);
     auto *zout = new QPushButton(tr("Zoom -"), playerBar);
 
@@ -451,7 +456,7 @@ void MainWindow::buildUi() {
     pb->addWidget(volumeSlider_);
     pb->addSpacing(12);
     pb->addWidget(new QLabel(tr("Display"), playerBar));
-    pb->addWidget(playerModeCombo_);
+    pb->addWidget(displayToggleBtn_);
     pb->addStretch(1);
     pb->addWidget(zin);
     pb->addWidget(zout);
@@ -480,11 +485,18 @@ void MainWindow::buildUi() {
     connect(volumeSlider_, &QSlider::valueChanged, this, [this](int v) {
         player_.setVolume(v / 100.0);
         Settings::instance().setVolume(v / 100.0);
+        // The ffmpeg direct-playback fallback is a separate process with its
+        // own volume: restart it at the current position with the new gain so
+        // the slider works in every output path.
+        if (playProc_ && wasPlaying_) restartFfmpegFallbackWithVolume();
     });
-    connect(playerModeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
-        QString mode = idx == 1 ? QStringLiteral("spectrogram") : QStringLiteral("wave");
+    connect(displayToggleBtn_, &QToolButton::clicked, this, [this] {
+        const bool toSpectrogram = view_->mode() != QLatin1String("spectrogram");
+        const QString mode = toSpectrogram ? QStringLiteral("spectrogram")
+                                           : QStringLiteral("wave");
         Settings::instance().setPlayerMode(mode);
         view_->setMode(mode);
+        displayToggleBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
     });
     connect(zin, &QPushButton::clicked, view_, &AudioView::zoomIn);
     connect(zout, &QPushButton::clicked, view_, &AudioView::zoomOut);
@@ -968,6 +980,21 @@ void MainWindow::updatePlayButton() {
     if (!playBtn_) return;
     const bool running = player_.isPlaying() || (playProc_ && wasPlaying_);
     playBtn_->setText(running ? tr("Pause") : tr("Play"));
+
+    // Loop highlight follows *active* looping only: the button lights up when
+    // loop is armed AND a session is playing/paused (Qt sink, pipe pump or
+    // ffmpeg fallback). Checked-but-idle or un-checked states stay unlit.
+    const bool active = loopBtn_->isChecked() &&
+                        (player_.isLoopActive() || (playProc_ && wasPlaying_));
+    static bool firstLoopStyle = true;
+    if (firstLoopStyle) {
+        loopBtn_->setAutoFillBackground(true);
+        firstLoopStyle = false;
+    }
+    const QPalette pal = active
+        ? loopBtn_->property("litPalette").value<QPalette>()
+        : loopBtn_->property("basePalette").value<QPalette>();
+    loopBtn_->setPalette(pal);
 }
 
 // ---------------- ffmpeg direct-playback fallback ----------------

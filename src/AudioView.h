@@ -13,6 +13,7 @@ public:
 
     void setData(const AudioData *audio);           // may be null
     void setMode(const QString &mode);              // "wave" | "spectrogram"
+    QString mode() const { return mode_; }
     void setMarkers(const QVector<Marker> *markers);// owned externally
     void setPlayheadFrame(qint64 frame);
     qint64 playheadFrame() const { return cursorFrame_; }

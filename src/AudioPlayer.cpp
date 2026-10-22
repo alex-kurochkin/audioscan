@@ -22,6 +22,20 @@ AudioPlayer::~AudioPlayer() {
     // device_ is child of this
 }
 
+void AudioPlayer::setVolume(double v) {
+    volume_.store(v);
+    // Devices whose gain is fixed at startup (the "aplay" pipe fallback)
+    // must be reconfigured live; the in-process float/Int16 paths read
+    // volume_ directly on every generated chunk, so they need nothing more.
+    if (volumeApplier_) volumeApplier_(v);
+}
+
+void AudioPlayer::setLooping(bool on) {
+    if (looping_ == on) return;
+    looping_ = on;
+    emit loopStateChanged(isLoopActive());
+}
+
 void AudioPlayer::setBuffer(const float *data, qint64 totalFrames, int channels, int sampleRate) {
     stop();
     buf_ = data;
@@ -95,6 +109,7 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     playing_ = true;
     paused_ = false;
     qtSinkMode_ = useQtSink;
+    emit loopStateChanged(isLoopActive());
 
     // Let the output owner (e.g. an aplay pipe) apply the current volume to
     // the already-running process before audio starts flowing through it.
@@ -107,6 +122,7 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
                     qWarning() << "AudioPlayer: sink error" << sink_->error();
                 }
                 playing_ = false;
+                emit loopStateChanged(false);
                 emit finished();
             }
         });
@@ -148,6 +164,7 @@ void AudioPlayer::pumpAudio() {
         qWarning() << "AudioPlayer: fallback sink write failed";
         if (pump_) pump_->stop();
         playing_ = false;
+        emit loopStateChanged(false);
         emit finished();
         return;
     }
@@ -176,7 +193,7 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
         qint64 framesAvail = loopEnd_ - posFrames_;
         if (framesAvail <= 0) {
             if (looping_) { posFrames_ = loopStart_; framesAvail = loopEnd_ - posFrames_; }
-            else { playing_ = false; emit finished(); return 0; }
+            else { playing_ = false; emit loopStateChanged(false); emit finished(); return 0; }
         }
         qint64 wantFrames = std::min(maxBytes / fbBytesPerFrame, framesAvail);
         if (wantFrames <= 0) return 0;
@@ -211,6 +228,7 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
             framesAvail = loopEnd_ - posFrames_;
         } else {
             playing_ = false;
+            emit loopStateChanged(false);
             emit finished();
             return 0;
         }
@@ -314,6 +332,7 @@ void AudioPlayer::stop() {
     if (outDevice_) { outDevice_->close(); delete outDevice_; outDevice_ = nullptr; }
     playing_ = false;
     paused_ = false;
+    emit loopStateChanged(isLoopActive());   // session over: loop is no longer active
     posFrames_ = startFrames_;   // rewind to the point where Play started
     emit positionChanged(posFrames_);
 }
