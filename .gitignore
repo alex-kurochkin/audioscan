@@ -1,3 +1,11 @@
 build/
 *.log
 *.sh
+
+# build artifacts
+*.deb
+*.buildinfo
+*.changes
+*.ddeb
+debian/tmp/
+debian/.debhelper/
