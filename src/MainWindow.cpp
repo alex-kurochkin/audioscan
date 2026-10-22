@@ -222,12 +222,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     QString dir, file; double pos = 0.0;
     Database::instance().getSessionState(dir, file, pos);
     if (!dir.isEmpty() && QDir(dir).exists()) {
+        // Expand the tree down to the restored directory so its node is
+        // visible and selected in the left panel (QDirModel resolves each
+        // path component lazily, index() walks/creates the hierarchy).
+        QModelIndex idx = fsModel_->index(dir);
+        while (idx.isValid()) {
+            tree_->setExpanded(idx, true);
+            idx = idx.parent();
+        }
         tree_->setCurrentIndex(fsModel_->index(dir));
+        tree_->scrollTo(fsModel_->index(dir));
         if (!file.isEmpty() && QFileInfo(file).exists() &&
             QFileInfo(file).absolutePath() == QDir(dir).absolutePath()) {
             pendingSessionFile_ = file;
             pendingSessionPosSec_ = pos;
         }
+        // Auto-load the files of the restored directory into the table.
         onDirSelected(dir);
     } else {
         onDirSelected(QDir::homePath());
@@ -267,9 +277,16 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     player_.stop();
-    Database::instance().setSessionState(
-        currentDir_, currentPath_,
-        audio_.sampleRate ? double(view_->cursorFrame()) / audio_.sampleRate : 0.0);
+    // Only persist the session we actually own: if startup restored a stale
+    // lastFile that was never loaded (user didn't touch anything), keep it
+    // untouched instead of clobbering good state with an empty one.
+    QString file = currentPath_;
+    double pos = audio_.sampleRate ? double(view_->cursorFrame()) / audio_.sampleRate : 0.0;
+    if (file.isEmpty() && !pendingSessionFile_.isEmpty()) {
+        file = pendingSessionFile_;
+        pos = pendingSessionPosSec_;
+    }
+    Database::instance().setSessionState(currentDir_, file, pos);
     e->accept();
 }
 
@@ -385,9 +402,9 @@ void MainWindow::buildUi() {
     connect(tree_, &QTreeView::clicked, this, [this](const QModelIndex &i) {
         onDirSelected(fsModel_->filePath(i));
     });
-    connect(tree_, &QTreeView::expanded, this, [this](const QModelIndex &i) {
-        onDirSelected(fsModel_->filePath(i));
-    });
+    // Expanding a tree node must NOT rescan the currently loaded directory:
+    // that would clobber the table right after the startup session restore.
+    // Only an explicit click (or double-click) switches the loaded directory.
     // Single click only highlights the row; double click loads the file
     // into the player (spec: file load via double click).
     connect(table_, &QTableView::doubleClicked,
