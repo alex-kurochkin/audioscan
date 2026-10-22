@@ -209,6 +209,18 @@ public:
         if (!index.isValid()) return Qt::NoItemFlags;
         return QFileSystemModel::flags(index) | Qt::ItemIsEnabled | Qt::ItemIsSelectable;
     }
+    // The tree shows a single meaningful column ("Folders"). We collapse the
+    // default 5-column QFileSystemModel (Name|Size|Type|Date Modified|Folder)
+    // down to one, which also removes the "Folder" column that has no meaning
+    // in a directory-only view.
+    int columnCount(const QModelIndex & /*parent*/ = QModelIndex()) const override {
+        return 1;
+    }
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override {
+        if (orientation == Qt::Horizontal && role == Qt::DisplayRole && section == 0)
+            return tr("Folders");
+        return QFileSystemModel::headerData(section, orientation, role);
+    }
 };
 
 // ---------------- helpers ----------------
@@ -309,7 +321,16 @@ void MainWindow::buildUi() {
     tree_ = new QTreeView(splitter);
     tree_->setModel(fsModel_);
     tree_->setRootIndex(fsModel_->index(QDir::rootPath()));
-    tree_->setHeaderHidden(true);
+    // Directory tree shows a single column with a visible title ("Folders").
+    // Width is user-resizable; the "Folder" column of QFileSystemModel is
+    // removed at the model level (DirTreeModel::columnCount == 1).
+    {
+        auto *hdr = tree_->header();
+        hdr->setVisible(true);
+        hdr->setSectionResizeMode(0, QHeaderView::Interactive);
+        hdr->setStretchLastSection(true);
+        hdr->resizeSection(0, 260);
+    }
     splitter->addWidget(tree_);
 
     auto *rightPanel = new QWidget(splitter);
