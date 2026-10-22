@@ -56,6 +56,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
     void keyPressEvent(QKeyEvent *) override;
+    void resizeEvent(QResizeEvent *) override;
 
 private:
     qint64 xToFrame(int x) const;

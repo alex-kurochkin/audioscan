@@ -203,7 +203,7 @@ static bool loadViaSndfile(const QString &path, AudioData &out, QString *err) {
     out.channels = info.channels;
     out.totalFrames = info.frames;
     out.format = sfToFormat(info.format);
-    out.container = info.format & SF_FORMAT_CONTAINERMASK;
+    out.container = info.format & SF_FORMAT_TYPEMASK;   // major (container) type
     const char *cmt = sf_get_string(sf, SF_STR_COMMENT);
     if (cmt) out.comment = QString::fromUtf8(cmt);
     out.samples.resize(out.totalFrames * out.channels);

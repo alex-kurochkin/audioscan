@@ -627,6 +627,7 @@ void MainWindow::buildUi() {
         view_->setSelectionRange(a, b);
     });
     connect(view_, &AudioView::markerClicked, this, &MainWindow::onMarkerClicked);
+    connect(view_, &AudioView::markerDoubleClicked, this, &MainWindow::openMarkerEditor);
     connect(view_, &AudioView::markerMoved, this, [this](int, qint64) { persistMarkers(); });
     connect(view_, &AudioView::cursorMoved, this, [this](qint64 f) {
         // Re-entrancy guard: programmatic cursor moves (playhead updates from

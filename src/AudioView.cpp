@@ -170,6 +170,13 @@ void AudioView::rebuildBaseImage() {
         base_ = Renderer::waveform(*audio_, w, h);
 }
 
+void AudioView::resizeEvent(QResizeEvent *e) {
+    QWidget::resizeEvent(e);
+    // The cached base image is rendered at widget resolution; rebuild it so a
+    // resized view never stretches/stales the old bitmap.
+    if (audio_ && audio_->valid) rebuildBaseImage();
+}
+
 void AudioView::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.fillRect(rect(), QColor(24, 24, 28));

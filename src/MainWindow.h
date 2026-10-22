@@ -62,6 +62,9 @@ private slots:
     void refreshPreviewsForDir();
     void createMarkerAt(qint64 frame);
     void onMarkerClicked(int idx);
+    void openMarkerEditor(int idx);
+    void zoomInPlayer();
+    void zoomOutPlayer();
     void applyHotkeys();
 
 private:
