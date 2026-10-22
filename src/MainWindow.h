@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QLabel>
 #include <functional>
 class QProcess;
 #include "AudioFile.h"
@@ -86,6 +87,7 @@ private:
     QComboBox *tableModeCombo_ = nullptr;
     AudioView *view_ = nullptr;
     QPushButton *playBtn_ = nullptr, *loopBtn_ = nullptr;
+    QLabel *activeFileLabel_ = nullptr;         // shows the active file on the action bar
     QToolButton *displayToggleBtn_ = nullptr;   // Waveform/Spectrogram toggle
     QSlider *volumeSlider_ = nullptr;
     QDoubleSpinBox *normLevel_ = nullptr;
@@ -126,5 +128,8 @@ private:
     // position in whichever output path is active (Qt sink, pipe fallback or
     // external ffmpeg process). No-op when nothing is playing.
     void seekPlaybackTo(qint64 frame);
+    // Refresh the active-file indicators: the label on the action panel and
+    // the window title ("AudioScout - <file name>").
+    void updateActiveFileDisplay();
     PreviewWorker *previewWorker_ = nullptr;
 };

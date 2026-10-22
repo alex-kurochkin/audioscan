@@ -10,6 +10,7 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QTextStream>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -407,7 +408,15 @@ void MainWindow::buildUi() {
     ab->addWidget(delSelBtn);
     ab->addWidget(delAllMarksBtn);
     ab->addWidget(renameBtn);
-    ab->addStretch(1);
+    // Name of the currently loaded (active) file, right after the Rename button.
+    activeFileLabel_ = new QLabel(actionsBar);
+    activeFileLabel_->setTextFormat(Qt::PlainText);
+    QFont afFont = activeFileLabel_->font();
+    afFont.setBold(true);
+    activeFileLabel_->setFont(afFont);
+    ab->addSpacing(12);
+    ab->addWidget(activeFileLabel_, 1);
+    ab->addStretch(2);
     lowerLay->addWidget(actionsBar);
 
     connect(muteBtn, &QPushButton::clicked, this, &MainWindow::doMute);
@@ -857,6 +866,7 @@ void MainWindow::loadCurrentFile() {
         audio_ = AudioData{};
         currentPath_.clear();
         view_->setData(nullptr);
+        updateActiveFileDisplay();
         return;
     }
     QString err;
@@ -866,6 +876,7 @@ void MainWindow::loadCurrentFile() {
                              tr("Cannot open %1\n%2").arg(r.name, err));
         audio_ = AudioData{};
         view_->setData(nullptr);
+        updateActiveFileDisplay();
         return;
     }
     currentPath_ = r.path;
@@ -876,6 +887,20 @@ void MainWindow::loadCurrentFile() {
     view_->setMarkers(&markers_);
     view_->setMode(Settings::instance().playerMode());
     undoStack_.clear();   // history is per-file/session-scope reset on load
+    updateActiveFileDisplay();
+}
+
+void MainWindow::updateActiveFileDisplay() {
+    const QString name = currentPath_.isEmpty()
+                             ? QString()
+                             : QFileInfo(currentPath_).fileName();
+    if (activeFileLabel_) {
+        activeFileLabel_->setText(name);
+        activeFileLabel_->setToolTip(currentPath_);
+        activeFileLabel_->setVisible(!name.isEmpty());
+    }
+    setWindowTitle(name.isEmpty() ? QStringLiteral("AudioScout")
+                                  : QStringLiteral("AudioScout - %1").arg(name));
 }
 
 // ---------------- playback ----------------
@@ -1544,6 +1569,7 @@ void MainWindow::renameCurrentFile() {
     if (QFile::rename(currentPath_, newPath)) {
         Database::instance().renameFilePath(currentPath_, newPath);
         currentPath_ = newPath;
+        updateActiveFileDisplay();     // reflect the new name immediately
         onDirSelected(currentDir_);   // rescan updates paths in the table
     } else {
         QMessageBox::warning(this, tr("Rename"), tr("Rename failed."));
