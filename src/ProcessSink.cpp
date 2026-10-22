@@ -70,6 +70,10 @@ bool ProcessSink::ensureStarted() {
     // broken MP3s) doesn't spam the terminal.
     proc_->setProcessChannelMode(QProcess::SeparateChannels);
     proc_->setStandardOutputFile(QStringLiteral("/dev/null"));
+    // Log the exact command line once: when a child misbehaves (bad option,
+    // device busy, wrong format) this is the first thing to reproduce by hand.
+    qInfo().noquote() << QStringLiteral("AudioPlayer: spawning sink '%1 %2'")
+                             .arg(program_, args_.join(QLatin1Char(' ')));
     proc_->start();
     // waitForStarted() only confirms our fork/exec helper ran; an ENOENT on
     // the real binary arrives one event-loop turn later as FailedToStart.
@@ -97,11 +101,39 @@ bool ProcessSink::ensureStarted() {
                 << QStringLiteral("AudioPlayer: sink '%1' stderr: %2")
                        .arg(program_, QString::fromUtf8(se).trimmed());
     }
+    qInfo().noquote() << QStringLiteral("AudioPlayer: sink '%1' running (pid=%2)")
+                             .arg(program_).arg(proc_->processId());
+    started_ = true;
     return true;
 }
 
 void ProcessSink::shutdown() {
     if (!proc_) return;
+    // If the child exited on its own before we tore it down, surface why —
+    // otherwise a mid-stream death looks like "playback silently stopped".
+    if (proc_->state() == QProcess::NotRunning && started_) {
+        const QByteArray se = proc_->readAllStandardError();
+        // Closing our write channel is how a healthy run ends (aplay sees EOF
+        // and exits 0); only non-zero/crash exits or stderr output are news.
+        const bool noteworthy =
+            se.trimmed().isEmpty()
+                ? (proc_->exitStatus() == QProcess::CrashExit ||
+                   proc_->exitCode() != 0)
+                : true;
+        if (noteworthy)
+            qWarning().noquote()
+                << QStringLiteral("AudioPlayer: sink '%1' already exited"
+                                  " (exitCode=%2, status=%3)%4")
+                       .arg(program_)
+                       .arg(proc_->exitCode())
+                       .arg(proc_->exitStatus() == QProcess::CrashExit
+                                ? QStringLiteral("CrashExit")
+                                : QStringLiteral("NormalExit"))
+                       .arg(se.trimmed().isEmpty()
+                                ? QString()
+                                : QStringLiteral(" | stderr: %1").arg(
+                                      QString::fromUtf8(se).trimmed()));
+    }
     proc_->closeWriteChannel();
     proc_->waitForFinished(300);
     if (proc_->state() == QProcess::Running) {

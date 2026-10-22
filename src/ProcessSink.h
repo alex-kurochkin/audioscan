@@ -30,6 +30,7 @@ private:
     QString program_;
     QStringList args_;
     QProcess *proc_ = nullptr;
+    bool started_ = false;   // child was successfully spawned at least once
 };
 
 // Build the "aplay" raw-PCM argument list for a format. The volume parameter
