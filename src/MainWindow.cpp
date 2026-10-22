@@ -794,44 +794,72 @@ void MainWindow::openColumnsDialog() {
     QSet<int> shown;
     currentColumnLayout(model_, fullOrder, shown);
 
-    QStringList labels;
-    for (int c : fullOrder) labels << model_->columnName(c);
+    QStringList keys, labels;
+    for (int c : fullOrder) {
+        keys << FileTableModel::columnKey(c);
+        labels << model_->columnName(c);
+    }
 
-    ColumnsDialog dlg(labels, shown, this);
+    ColumnsDialog dlg(keys, labels, shown, this);
     dlg.setWindowTitle(tr("Columns"));
     if (dlg.exec() != QDialog::Accepted) return;   // Cancel: nothing changes
 
-    const QSet<int> sel = dlg.selected();
-    if (sel.isEmpty()) {
+    const QStringList selKeys = dlg.selectedKeys();
+    if (selKeys.isEmpty()) {
         QMessageBox::warning(this, tr("Columns"),
                              tr("At least one column must be visible."));
         return;
     }
+    // Flush the currently displayed widths into the in-memory map first, so
+    // columns that are about to be re-shown come back with their last size
+    // instead of the built-in default.
+    colWidthSaveTimer_.stop();
+    if (table_ && model_) {
+        auto *hdr = table_->horizontalHeader();
+        const auto &visCols = model_->visibleColumns();
+        for (int log = 0; log < visCols.size(); ++log)
+            if (!hdr->isSectionHidden(log))
+                colWidths_.insert(visCols[log], table_->columnWidth(log));
+    }
+
     // Keep the persisted relative order; just filter to the chosen set.
     QVector<int> vis;
-    for (int c : fullOrder)
-        if (sel.contains(c)) vis << c;
+    QStringList visKeys;
+    for (int i = 0; i < fullOrder.size(); ++i) {
+        if (selKeys.contains(keys.at(i))) {
+            vis << fullOrder[i];
+            visKeys << keys.at(i);
+        }
+    }
     model_->updateVisibleColumns(vis);
 
-    QStringList keys;
-    for (int cc : vis) keys << FileTableModel::columnKey(cc);
-    Settings::instance().setVisibleColumns(keys);
-    QStringList allKeys;
-    for (int cc : fullOrder) allKeys << FileTableModel::columnKey(cc);
-    Settings::instance().setColumnOrder(allKeys);
-    applyTableColumnWidths();
-    updateSortIndicator();
+    // updateVisibleColumns() resets the model -> the header falls back to the
+    // default order; re-apply the persisted drag-reorder right away so the
+    // visible arrangement matches what was saved on the previous run.
+    applySavedColumnOrder();
+
+    // Persist immediately (Save click): visible set + full order. The next
+    // start restores both from config.json via the persisted keys.
+    Settings::instance().setVisibleColumns(visKeys);
+    Settings::instance().setColumnOrder(keys);
+    loadColumnWidths();                       // pick up widths saved mid-run
+    saveColumnWidths();                       // widths -> SQLite session DB
+    QTimer::singleShot(0, this, [this] {      // after the model reset settles
+        applySavedColumnOrder();              // keep drag-reorder of header
+        applyTableColumnWidths();             // restore per-column sizes
+        updateSortIndicator();
+    });
 }
 
-ColumnsDialog::ColumnsDialog(const QStringList &labels, const QSet<int> &shown,
-                             QWidget *parent)
-    : QDialog(parent) {
+ColumnsDialog::ColumnsDialog(const QStringList &keys, const QStringList &labels,
+                             const QSet<int> &shown, QWidget *parent)
+    : QDialog(parent), keys_(keys) {
     auto *lay = new QVBoxLayout(this);
     lay->addWidget(new QLabel(tr("Show columns:")));
     for (int i = 0; i < labels.size(); ++i) {
         auto *cb = new QCheckBox(labels[i], this);
         cb->setChecked(shown.contains(i));
-        checks_.append({i, cb});
+        checks_.append(cb);
         lay->addWidget(cb);
     }
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
@@ -842,10 +870,10 @@ ColumnsDialog::ColumnsDialog(const QStringList &labels, const QSet<int> &shown,
     setWindowTitle(tr("Columns"));
 }
 
-QSet<int> ColumnsDialog::selected() const {
-    QSet<int> out;
-    for (const auto &p : checks_)
-        if (p.second->isChecked()) out.insert(p.first);
+QStringList ColumnsDialog::selectedKeys() const {
+    QStringList out;
+    for (int i = 0; i < checks_.size(); ++i)
+        if (checks_[i]->isChecked()) out << keys_.at(i);
     return out;
 }
 
@@ -881,7 +909,10 @@ void MainWindow::saveColumnLayout() {
 void MainWindow::applySavedColumnOrder() {
     if (!table_ || !model_) return;
     auto *hdr = table_->horizontalHeader();
-    const QStringList fullKeys = Settings::instance().columnOrder();
+    QStringList fullKeys = Settings::instance().columnOrder();
+    // Fall back to the visible-columns key for legacy configs that predate
+    // the separate "full order" entry.
+    if (fullKeys.isEmpty()) fullKeys = Settings::instance().visibleColumns();
     if (fullKeys.isEmpty()) return;
     const auto &visCols = model_->visibleColumns();
     QVector<int> targetVis;   // logical indices in the desired visual order
@@ -899,12 +930,10 @@ void MainWindow::applySavedColumnOrder() {
     }
 }
 
-// Read the per-column widths stored in the SQLite session table (once per
-// run — the DB does not change while we are running).
+// Read the per-column widths stored in the SQLite session table. Reloaded on
+// every call (cheap) so widths saved by the Columns dialog mid-run are picked
+// up immediately; the DB does not change while we are running otherwise.
 void MainWindow::loadColumnWidths() {
-    static bool loaded = false;
-    if (loaded) return;
-    loaded = true;
     const QString json = Database::instance().sessionValue(QStringLiteral("colWidths"));
     if (json.isEmpty()) return;
     const QJsonObject obj = QJsonDocument::fromJson(json.toUtf8()).object();

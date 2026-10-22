@@ -22,6 +22,46 @@ static void runColumnSelfTest(MainWindow &w) {
         QMetaObject::invokeMethod(&w, "close", Qt::QueuedConnection);
     });
 }
+
+// Dev-only: drives the "Columns" dialog like a user — unchecks one column,
+// resizes another, clicks Save, then closes the app. Verifies that the
+// visibility/order/width choices persist across restarts.
+//   AUDIOSCOUT_COLSAVE=<uncheckTitle>:<resizeLogical>:<newWidth>
+static void runColumnsDialogSaveTest(MainWindow &w) {
+    const QString spec = QString::fromLocal8Bit(qgetenv("AUDIOSCOUT_COLSAVE"));
+    QTimer::singleShot(2500, [&w, spec] {
+        const QString uncheckTitle = spec.section(':', 0, 0);
+        const int resizeLogical = spec.section(':', 1, 1).toInt();
+        const int newWidth = spec.section(':', 2, 2).toInt();
+
+        w.openColumnsDialog();   // opens the modal dialog (exec())
+        QEventLoop loop;
+        ColumnsDialog *dlg = nullptr;
+        for (int i = 0; i < 60 && !dlg; ++i) {
+            QTimer::singleShot(50, &loop, [&] {
+                dlg = w.findChild<ColumnsDialog *>();
+                if (dlg) loop.quit();
+            });
+            loop.processEvents();
+        }
+        if (!dlg) { qWarning("TEST: Columns dialog not found"); return; }
+        const auto boxes = dlg->findChildren<QCheckBox *>();
+        bool toggled = false;
+        for (auto *cb : boxes)
+            if (cb->text().compare(uncheckTitle, Qt::CaseInsensitive) == 0) {
+                cb->setChecked(false); toggled = true;
+            }
+        if (!toggled) qWarning("TEST: checkbox '%s' not found", qPrintable(uncheckTitle));
+        if (resizeLogical >= 0 && newWidth > 0)
+            w.testTable()->setColumnWidth(resizeLogical, newWidth);
+        // Click Save in the dialog's button box.
+        bool saved = false;
+        for (auto *bb : dlg->findChildren<QDialogButtonBox *>())
+            if (auto *save = bb->button(QDialogButtonBox::Save)) { save->click(); saved = true; }
+        qWarning("TEST: dialog save clicked=%d", int(saved));
+        QTimer::singleShot(800, [&w] { QMetaObject::invokeMethod(&w, "close", Qt::QueuedConnection); });
+    });
+}
 #endif
 
 int main(int argc, char *argv[]) {

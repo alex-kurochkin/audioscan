@@ -44,6 +44,7 @@ public:
     // Test hooks (only compiled with -DAUDIOSCOUT_TESTING).
     QTableView *testTable() const { return table_; }
     FileTableModel *testModel() const { return model_; }
+    void openColumnsDialogForTest() { openColumnsDialog(); }
 #endif
 
 protected:
@@ -171,10 +172,12 @@ private:
 // new visible set and persists it (header order is kept as-is).
 class ColumnsDialog : public QDialog {
 public:
-    explicit ColumnsDialog(const QStringList &labels, const QSet<int> &shown,
-                           QWidget *parent = nullptr);
-    QSet<int> selected() const;
+    explicit ColumnsDialog(const QStringList &keys, const QStringList &labels,
+                           const QSet<int> &shown, QWidget *parent = nullptr);
+    // Column ids (indices into the label list) checked in the dialog.
+    QStringList selectedKeys() const;
 
 private:
-    QVector<QPair<int, QCheckBox *>> checks_;
+    QStringList keys_;
+    QVector<QCheckBox *> checks_;
 };
