@@ -49,6 +49,10 @@ public:
     }
 
     // ---- entry points (wired to buttons/hotkeys by MainWindow) ----
+    // All public entry points are crash-proof by contract: they must work
+    // even if setContext()/setFallback() were never called (controllers get
+    // wired up late in buildUi(), and a stray hotkey/signal must not be able
+    // to dereference a null widget pointer — that used to SIGSEGV on Play).
     void playPause();          // start / pause / resume, then sync the button
     void stopPlayback();
     // Seek during playback: continues from the new position in whichever

@@ -858,7 +858,7 @@ void MainWindow::rangeChanged(qint64, qint64) {
 // stuck on "Pause". The Loop button lights only when looping is armed AND
 // audible (Qt sink loop active or a running fallback session).
 void MainWindow::updatePlayButton() {
-    if (!playBtn_) return;
+    if (!playBtn_ || !loopBtn_ || !pc_) return;   // early signals: nothing to sync yet
     const bool running = pc_->isRunning();
     playBtn_->setText(running ? tr("Pause") : tr("Play"));
 

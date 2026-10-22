@@ -19,6 +19,7 @@ PlayerController::PlayerController(AudioPlayer *player,
     : QObject(parent), player_(player), fb_(fb), ui_(ui) {}
 
 bool PlayerController::isRunning() const {
+    if (!player_) return fallbackActive();
     return player_->isPlaying() || player_->isPaused() || fallbackActive();
 }
 
@@ -27,7 +28,7 @@ bool PlayerController::startFallback(qint64 startFrame, qint64 endFrame, bool lo
     // Programmatic session: the cursor moves inside must never be read as a
     // user click-to-seek.
     const bool ok = fb_->start(startFrame, endFrame, loop);
-    if (ok) ui_->updatePlayButton();
+    if (ok && ui_) ui_->updatePlayButton();
     return ok;
 }
 
@@ -40,11 +41,14 @@ void PlayerController::playPause() {
     // resume path: whatever actually ended up running decides the text, so
     // the button can never stay on "Play" while audio is playing (the old
     // "blinks and stays Play" bug) nor on "Pause" after a failed start.
-    ui_->updatePlayButton();
+    if (ui_) ui_->updatePlayButton();
 }
 
 void PlayerController::playPauseInner() {
-    if (!audio_ || !audio_->valid) return;
+    // Every pointer this path touches may still be unwired early in the
+    // window's lifetime (setContext()/setFallback() run late in buildUi()).
+    // Bail out instead of crashing — a stray Space press must not SIGSEGV.
+    if (!player_ || !audio_ || !audio_->valid || !view_ || !loopBtn_ || !playBtn_ || !ui_) return;
     if (player_->isPlaying()) {          // in-process Qt sink is running
         player_->pause();
         playBtn_->setText(QObject::tr("Play"));
@@ -171,6 +175,7 @@ void PlayerController::playPauseInner() {
 }
 
 void PlayerController::stopPlayback() {
+    if (!player_ || !ui_) return;   // unwired controller: nothing to stop
     // Qt session: Stop rewinds the cursor to where playback last started.
     const qint64 qtResume = player_->isPlaying() || player_->isPaused()
                                 ? player_->startFrame() : -1;
@@ -180,7 +185,7 @@ void PlayerController::stopPlayback() {
 
     player_->stop();
     resetFallbackState();
-    playBtn_->setText(QObject::tr("Play"));
+    if (playBtn_) playBtn_->setText(QObject::tr("Play"));
     if (qtResume >= 0)
         ui_->setPlayhead(qtResume, true);
     else if (fbResume >= 0)
@@ -192,7 +197,7 @@ void PlayerController::stopPlayback() {
 // Seek to a frame while playback is active, in whichever output path runs.
 // Called from the waveform click handler (AudioView::cursorMoved).
 void PlayerController::seekPlaybackTo(qint64 frame) {
-    if (!audio_ || !audio_->valid) return;
+    if (!player_ || !audio_ || !audio_->valid || !view_ || !ui_) return;
 
     // In-process playback (Qt QAudioSink pull mode or pipe pump): jump the
     // position and keep playing/paused state as it is. The seek stays inside
@@ -241,7 +246,7 @@ void PlayerController::seekPlaybackTo(qint64 frame) {
 // file. While playback is active the range is re-armed immediately so
 // looping takes effect live.
 void PlayerController::onLoopToggled(bool on) {
-    if (!audio_ || !audio_->valid) return;
+    if (!player_ || !audio_ || !audio_->valid || !view_ || !ui_) return;
     const qint64 selStart = view_->selStart();
     const qint64 selEnd   = view_->selEnd();
     const bool hasSel     = view_->hasSelection();
@@ -291,10 +296,10 @@ void PlayerController::onLoopToggled(bool on) {
 void PlayerController::onVolumeChanged() {
     if (fallbackActive() && fb_->wasPlaying()) {
         if (fb_->restartWithVolume()) {
-            playBtn_->setText(QObject::tr("Pause"));
+            if (playBtn_) playBtn_->setText(QObject::tr("Pause"));
         } else {
-            playBtn_->setText(QObject::tr("Play"));
-            ui_->showStatus(QObject::tr("Volume change failed (external player could not restart)"), 4000);
+            if (playBtn_) playBtn_->setText(QObject::tr("Play"));
+            if (ui_) ui_->showStatus(QObject::tr("Volume change failed (external player could not restart)"), 4000);
         }
     }
 }
@@ -302,9 +307,9 @@ void PlayerController::onVolumeChanged() {
 // The fallback process ended on its own.
 void PlayerController::onFallbackFinished(bool error) {
     if (error) {
-        ui_->showStatus(QObject::tr("Playback failed (external player error)"), 5000);
+        if (ui_) ui_->showStatus(QObject::tr("Playback failed (external player error)"), 5000);
         return;
     }
-    playBtn_->setText(QObject::tr("Play"));
-    ui_->updatePlayButton();   // fallback session over: sync Pause/Loop styling
+    if (playBtn_) playBtn_->setText(QObject::tr("Play"));
+    if (ui_) ui_->updatePlayButton();   // fallback session over: sync Pause/Loop styling
 }
