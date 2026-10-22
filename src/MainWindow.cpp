@@ -577,6 +577,13 @@ void MainWindow::buildUi() {
     });
     connect(&player_, &AudioPlayer::finished, this, [this] {
         playBtn_->setText(tr("Play"));
+        // Natural end of a non-looped session (e.g. playback reached the end
+        // of a selection): jump the visible cursor back to where the session
+        // started, so it matches what the next Play will resume from. With
+        // Loop on the range repeats forever, so finished() only fires on
+        // errors — leave the cursor alone then.
+        if (!loopBtn_->isChecked())
+            view_->setPlayheadFrame(player_.startFrame());
     });
     // Safety net: whenever the Qt sink state changes (finish, device error,
     // external stop), sync the button so it never sticks on "Pause".
@@ -980,6 +987,12 @@ void MainWindow::playPause() {
         } else if (loop) {
             start = 0;
         }
+        // Resume from the visible cursor when it sits inside the resume range
+        // (e.g. after a live seek during the previous session); otherwise the
+        // session simply starts at its recorded start point. The cursor and
+        // the audible position must never disagree.
+        const qint64 ph = view_->playheadFrame();
+        if (ph > start && ph < end) start = ph;
         player_.play(start, end, loop);
         if (player_.isPlaying()) {
             playBtn_->setText(tr("Pause"));
@@ -1044,11 +1057,23 @@ void MainWindow::playPause() {
 }
 
 void MainWindow::stopPlayback() {
+    // Qt session: Stop rewinds the cursor to where playback last started.
+    const qint64 qtResume = player_.isPlaying() || player_.isPaused()
+                                ? player_.startFrame() : -1;
+    // ffmpeg fallback: same rule — return to the session's start point.
+    const bool fbActive = playProc_ && wasPlaying_;
+    const qint64 fbResume = fbActive ? fbStartFrame_ : -1;
+
     player_.stop();
     stopFfmpegFallback();
     fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
     playBtn_->setText(tr("Play"));
-    view_->setPlayheadFrame(player_.currentFrame());
+    if (qtResume >= 0)
+        view_->setPlayheadFrame(qtResume);
+    else if (fbResume >= 0)
+        view_->setPlayheadFrame(fbResume);
+    else
+        view_->setPlayheadFrame(player_.currentFrame());
 }
 
 // Seek to a frame while playback is active, in whichever output path runs.
@@ -1066,16 +1091,31 @@ void MainWindow::seekPlaybackTo(qint64 frame) {
     }
 
     // External ffmpeg fallback process: restart it from the new position so
-    // playback continues there. The range end and loop flag are preserved.
-    if (playProc_) {
-        const bool loop = fbLooping_;
-        const qint64 end = fbEndFrame_;
+    // playback continues there. A click inside the current range keeps the
+    // range (and loop) intact; a click *outside* it (e.g. past the end of a
+    // selection while playing) retargets the session to [clicked frame ..
+    // file end] without looping, so playback actually continues from the
+    // click instead of instantly finishing at the old range boundary.
+    if (playProc_ || (fbStartFrame_ > 0) || (fbEndFrame_ > 0)) {
+        bool loop = fbLooping_;
+        qint64 end = fbEndFrame_;
+        const bool insideRange = frame >= fbStartFrame_ && frame < end;
+        if (!insideRange) {
+            end = audio_.totalFrames;
+            loop = false;   // clicked outside: play on to the file end
+        }
+        const qint64 prevStart = fbStartFrame_, prevEnd = fbEndFrame_;
+        const bool prevLoop = fbLooping_;
         stopFfmpegFallback();             // kills the proc, clears resume state
         startFfmpegFallback(frame, end, loop);
         if (playProc_) {
             playBtn_->setText(tr("Pause"));
             view_->setPlayheadFrame(frame);
+            lastPlayStartFrame_ = frame;  // next Play resumes from the click
         } else {
+            // Restart failed: restore the previous session state so Stop/Play
+            // bookkeeping stays consistent, and report.
+            fbStartFrame_ = prevStart; fbEndFrame_ = prevEnd; fbLooping_ = prevLoop;
             playBtn_->setText(tr("Play"));
             statusBar()->showMessage(tr("Seek failed (external player could not restart)"), 4000);
         }

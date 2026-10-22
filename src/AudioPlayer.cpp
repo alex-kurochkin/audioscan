@@ -151,6 +151,8 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     posFrames_ = startFrame;
     loopStart_ = startFrame;
     loopEnd_ = endFrame;
+    sessStart_ = startFrame;
+    sessEnd_ = endFrame;
     looping_ = loop;
     playing_ = true;
     paused_ = false;
@@ -317,7 +319,10 @@ void AudioPlayer::pause() {
 void AudioPlayer::resume() {
     if (playing_ || !paused_) return;
     // Continue from the position where we paused; keep the original
-    // play-start point so Stop still rewinds there (spec 2.6).
+    // play-start point so Stop still rewinds there (spec 2.6). Use the
+    // session's *original* range, not the possibly seek-retargeted one: a
+    // selection that already finished must not re-loop when Loop is off.
+    if (!looping_ && posFrames_ >= sessEnd_) posFrames_ = sessStart_;
     paused_ = false;
     playing_ = true;
     if (qtSinkMode_) {
@@ -335,6 +340,17 @@ void AudioPlayer::resume() {
 void AudioPlayer::seek(qint64 frame) {
     if (!buf_ || totalFrames_ == 0) return;
     frame = std::clamp(frame, qint64(0), totalFrames_ - 1);
+    // Seeking outside the active range (e.g. clicking past a selection while
+    // playing) retargets the session to [clicked position .. file end] so
+    // playback continues from the click instead of instantly "finishing".
+    if ((playing_ || paused_) && loopEnd_ > 0) {
+        if (frame >= loopEnd_) {
+            loopEnd_ = totalFrames_;
+            if (frame < startFrames_) startFrames_ = frame;
+        } else if (frame < startFrames_) {
+            startFrames_ = frame;
+        }
+    }
     posFrames_ = frame;
     if (!playing_ && !paused_) {
         // No active session: just remember the position for the next resume.
@@ -369,7 +385,7 @@ void AudioPlayer::seek(qint64 frame) {
 void AudioPlayer::resumeOrStopToggle() {
     if (playing_) pause();
     else if (paused_) resume();
-    else play(startFrames_, loopEnd_, looping_);
+    else play(sessStart_, looping_ ? loopEnd_ : sessEnd_, looping_);
 }
 
 void AudioPlayer::stop() {

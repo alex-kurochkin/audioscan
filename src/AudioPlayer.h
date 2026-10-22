@@ -69,6 +69,8 @@ public:
 
     qint64 currentFrame() const { return posFrames_; }
     qint64 startFrame() const { return startFrames_; }
+    // End of the active/last playback range (selection end or file end).
+    qint64 endFrame() const { return loopEnd_; }
 
 signals:
     void positionChanged(qint64 frame);
@@ -119,6 +121,12 @@ private:
     qint64 posFrames_ = 0;       // current playback position (kept after Stop)
     qint64 startFrames_ = 0;     // where the last Play session began (resume point)
     qint64 loopStart_ = 0, loopEnd_ = 0;
+    // Session range as it was when audio actually started. A live seek may
+    // retarget loopEnd_/startFrames_ (clicking outside the range while
+    // playing); we keep the originals so pause/resume and stop() still use
+    // the real session boundaries — notably so resume does NOT re-loop a
+    // finished selection when Loop is off.
+    qint64 sessStart_ = 0, sessEnd_ = 0;
     bool looping_ = false;
     bool playing_ = false;
     bool paused_ = false;        // paused mid-playback, resumable from posFrames_
