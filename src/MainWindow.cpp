@@ -219,14 +219,9 @@ void MainWindow::buildUi() {
     actRefreshPrev_ = new QAction(tr("Refresh previews"), tb);
     tb->addAction(actRefreshPrev_);
 
-    actZoomIn_ = tb->addAction(tr("+Z"));
-    actZoomOut_ = tb->addAction(tr("-Z"));
-
     actSettings_ = tb->addAction(tr("Settings"));
 
     connect(actRefreshPrev_, &QAction::triggered, this, &MainWindow::refreshPreviewsForDir);
-    connect(actZoomIn_, &QAction::triggered, this, &MainWindow::zoomInPlayer);
-    connect(actZoomOut_, &QAction::triggered, this, &MainWindow::zoomOutPlayer);
     connect(actSettings_, &QAction::triggered, this, &MainWindow::showSettings);
     connect(tableModeBtn_, &QToolButton::clicked, this, [this] {
         const bool toSpectrogram =
@@ -432,8 +427,6 @@ void MainWindow::buildUi() {
                                    ? tr("Spectrogram") : tr("Waveform"));
     displayToggleBtn_->setToolTip(tr("Click to switch between Waveform and Spectrogram"));
     displayToggleBtn_->setAutoRaise(false);
-    auto *zin = new QPushButton(tr("Zoom +"), playerBar);
-    auto *zout = new QPushButton(tr("Zoom -"), playerBar);
 
     pb->addWidget(prevBtn);
     pb->addWidget(playBtn_);
@@ -447,8 +440,6 @@ void MainWindow::buildUi() {
     // No "Display" label: the toggle button alone shows the current mode.
     pb->addWidget(displayToggleBtn_);
     pb->addStretch(1);
-    pb->addWidget(zin);
-    pb->addWidget(zout);
     lowerLay->addWidget(playerBar);
 
     connect(prevBtn, &QPushButton::clicked, this, &MainWindow::prevFile);
@@ -493,8 +484,6 @@ void MainWindow::buildUi() {
         view_->setMode(mode);
         displayToggleBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
     });
-    connect(zin, &QPushButton::clicked, this, &MainWindow::zoomInPlayer);
-    connect(zout, &QPushButton::clicked, this, &MainWindow::zoomOutPlayer);
 
     // ---- visualization area ----
     view_ = new AudioView(lowerPane);
@@ -1970,14 +1959,6 @@ void MainWindow::onMarkerClicked(int idx) {
     // inside the view's press handler), connected below.
     if (idx < 0 || idx >= markers_.size()) return;
     view_->setActiveMarkerIndex(idx);
-}
-
-void MainWindow::zoomInPlayer() {
-    if (view_) view_->zoomIn();
-}
-
-void MainWindow::zoomOutPlayer() {
-    if (view_) view_->zoomOut();
 }
 
 void MainWindow::openMarkerEditor(int idx) {

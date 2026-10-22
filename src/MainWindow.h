@@ -73,8 +73,6 @@ private slots:
     void createMarkerAt(qint64 frame);
     void onMarkerClicked(int idx);
     void openMarkerEditor(int idx);
-    void zoomInPlayer();
-    void zoomOutPlayer();
     void applyHotkeys();
 
 private:
@@ -113,7 +111,7 @@ private:
     QToolButton *displayToggleBtn_ = nullptr;   // Waveform/Spectrogram toggle
     QSlider *volumeSlider_ = nullptr;
     QDoubleSpinBox *normLevel_ = nullptr;
-    QAction *actRefreshPrev_ = nullptr, *actZoomIn_ = nullptr, *actZoomOut_ = nullptr;
+    QAction *actRefreshPrev_ = nullptr;
     QAction *actSettings_ = nullptr;
 
     // State
