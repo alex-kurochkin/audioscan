@@ -38,6 +38,10 @@ public:
         for (const auto &j : queue) if (j.path == path) return true;
         return processing_ == path;
     }
+    void clearQueue() {
+        QMutexLocker l(&mtx);
+        queue.clear();
+    }
 signals:
     void done(const QString &path, const QString &imagePath);
 
@@ -70,12 +74,15 @@ private:
 
     QString render(const Job &job) {
         auto &S = Settings::instance();
-        QFileInfo fi(job.path);
+        // A caller may tag the path with "#gN" (generation counter) to discard
+        // results of superseded refresh batches; strip it for file I/O/cache.
+        const QString realPath = job.path.section(QLatin1Char('#'), 0, 0);
+        QFileInfo fi(realPath);
         qint64 size = fi.size();
         qint64 mtime = fi.lastModified().toMSecsSinceEpoch();
 
         // cache hit?
-        QString uuid = Database::instance().lookupPreview(job.path, size, mtime, job.mode);
+        QString uuid = Database::instance().lookupPreview(realPath, size, mtime, job.mode);
         if (!uuid.isEmpty()) {
             QString existing = S.previewCacheDir() + "/" + uuid + QStringLiteral(".png");
             if (QFileInfo::exists(existing)) return existing;
@@ -83,7 +90,7 @@ private:
 
         AudioData data;
         QString err;
-        if (!AudioFile::load(job.path, data, &err))
+        if (!AudioFile::load(realPath, data, &err))
             return QString();
 
         QImage img = job.mode == QLatin1String("spectrogram")
@@ -94,7 +101,7 @@ private:
         QString file = S.previewCacheDir() + "/" + newUuid + QStringLiteral(".png");
         QDir().mkpath(S.previewCacheDir());
         if (!img.save(file, "PNG")) return QString();
-        Database::instance().storePreview(job.path, size, mtime, job.mode, newUuid);
+        Database::instance().storePreview(realPath, size, mtime, job.mode, newUuid);
         return file;
     }
 };
@@ -134,4 +141,8 @@ void PreviewWorker::request(const QString &path, const QString &mode) {
 
 bool PreviewWorker::hasPending(const QString &path) const {
     return runner_->pending(path);
+}
+
+void PreviewWorker::clearQueue() {
+    runner_->clearQueue();
 }

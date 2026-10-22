@@ -89,12 +89,16 @@ private:
     void saveColumnWidths();         // persist per-column widths to config.json
     void loadColumnWidths();         // read persisted widths from config.json
     void requestPreview(int row);
+    void applyPreviewMode(const QString &mode);   // switch previews to one mode atomically
     bool editGuarded();          // checks editable format + write perms
     void persistMarkers();
     void applyEditToRange(std::function<void()> op, const QString &type,
                           qint64 off, qint64 len,
                           const QVector<UndoRecord::MarkerDelta> &deltas = {});
     int currentRow() const;      // sorted/view row -> source row mapping handled internally
+    int previewGeneration_ = 0;  // bumped on every mode switch/refresh: stale
+                                 // worker results of an older generation are dropped,
+                                 // so the table never mixes wave and spectrogram rows
     void restorePendingSession(); // select+load last file & seek after a scan (spec 10.2)
 
     // UI

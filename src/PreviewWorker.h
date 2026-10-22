@@ -14,8 +14,13 @@ public:
     ~PreviewWorker() override;
     void request(const QString &path, const QString &mode);
     bool hasPending(const QString &path) const;
+    // Drop every queued job (used when the preview mode changes mid-scan so
+    // stale renders of the previous mode never reach the table).
+    void clearQueue();
 
 signals:
+    // path may carry a generation tag suffix ("#gN") supplied by the caller;
+    // it is stripped before rendering and echoed back verbatim in ready().
     void ready(const QString &path, const QString &imagePath);
 
 private:

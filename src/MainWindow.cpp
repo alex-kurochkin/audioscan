@@ -376,10 +376,11 @@ void MainWindow::buildUi() {
     connect(tableModeBtn_, &QToolButton::clicked, this, [this] {
         const bool toSpectrogram =
             Settings::instance().tablePreviewMode() != QLatin1String("spectrogram");
-        Settings::instance().setTablePreviewMode(toSpectrogram ? QStringLiteral("spectrogram")
-                                                               : QStringLiteral("wave"));
         tableModeBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
-        refreshPreviewsForDir();
+        // Atomic switch: in-flight previews of the old mode are discarded and
+        // the whole visible batch is re-rendered in the new mode.
+        applyPreviewMode(toSpectrogram ? QStringLiteral("spectrogram")
+                                       : QStringLiteral("wave"));
     });
 
     // ---- splitter: tree | table ----
@@ -755,9 +756,17 @@ void MainWindow::buildUi() {
         if (imgPath.isEmpty()) return;
         QImage img(imgPath);
         if (img.isNull()) return;
+        // The image path carries the generation tag it was requested under
+        // ("#gN" suffix, stripped by PreviewWorker before rendering). Results
+        // of a superseded mode switch/refresh are dropped so the table never
+        // ends up with a mix of wave and spectrogram previews.
+        const QString base = path.section(QLatin1Char('#'), 0, 0);
+        const int gen = path.contains(QLatin1Char('#'))
+            ? path.section(QLatin1Char('#'), 1).toInt() : -1;
+        if (gen != previewGeneration_) return;   // stale result from an older fill
         const auto &rows = model_->rows();
         for (int i = 0; i < rows.size(); ++i)
-            if (rows[i].path == path) { model_->setPreview(i, img); break; }
+            if (rows[i].path == base) { model_->setPreview(i, img); break; }
     });
 
 }
@@ -1169,11 +1178,21 @@ void MainWindow::requestPreview(int row) {
     if (row < 0 || row >= model_->rows().size()) return;
     const auto &r = model_->rows()[row];
     if (r.broken || r.previewLoaded) return;
-    if (previewWorker_->hasPending(r.path)) return;
-    previewWorker_->request(r.path, Settings::instance().tablePreviewMode());
+    // Tag the request with the current generation so results of a superseded
+    // mode switch/refresh batch are discarded in the ready() handler.
+    const QString tagged = r.path + QLatin1Char('#') + QString::number(previewGeneration_);
+    if (previewWorker_->hasPending(tagged)) return;
+    previewWorker_->request(tagged, Settings::instance().tablePreviewMode());
 }
 
-void MainWindow::refreshPreviewsForDir() {
+// Switch every table preview to one mode atomically: bump the generation
+// counter (in-flight renders of the previous batch become stale and are
+// dropped), clear the worker queue, wipe already-shown previews and start a
+// fresh fill — so the Preview column never mixes wave and spectrogram rows.
+void MainWindow::applyPreviewMode(const QString &mode) {
+    Settings::instance().setTablePreviewMode(mode);
+    ++previewGeneration_;
+    previewWorker_->clearQueue();
     Database::instance().invalidatePreviewsForDir(currentDir_);
     auto mutableRows = model_->rows();
     for (auto &r : mutableRows) { r.previewLoaded = false; r.preview = QImage(); }
@@ -1181,6 +1200,12 @@ void MainWindow::refreshPreviewsForDir() {
     int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(mutableRows.size()));
     for (int i = 0; i < n; ++i)
         if (!mutableRows[i].broken) requestPreview(i);
+}
+
+void MainWindow::refreshPreviewsForDir() {
+    ++previewGeneration_;   // discard in-flight results of the previous batch
+    previewWorker_->clearQueue();
+    applyPreviewMode(Settings::instance().tablePreviewMode());
 }
 
 void MainWindow::onSearchClicked() {
