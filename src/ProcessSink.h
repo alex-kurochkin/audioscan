@@ -24,7 +24,11 @@ public:
 
     // Discard all not-yet-flushed bytes and force the child to stop feeding
     // stale PCM (used on seek/stop so a position jump is heard immediately).
-    void flushPipe();
+    // If `force` is true the child is interrupted even when nothing is queued
+    // on our side: the kernel pipe plus aplay's own ALSA ring can still hold
+    // up to ~0.5 s of audio from the OLD position, which must not keep
+    // playing after a click-to-seek ("cursor jumps late" symptom).
+    void flushPipe(bool force = false);
     // Bytes accepted by write() but still queued for the child's stdin.
     qint64 discardBuffered();
 

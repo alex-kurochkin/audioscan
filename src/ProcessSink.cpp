@@ -88,30 +88,43 @@ qint64 ProcessSink::discardBuffered() {
     return proc_ ? proc_->bytesToWrite() : 0;
 }
 
-void ProcessSink::flushPipe() {
+void ProcessSink::flushPipe(bool force) {
     // Drop everything the pump has already handed to the child's stdin pipe.
     // A seek must be heard at once: without this, QProcess's internal buffer
     // plus the kernel pipe (typically ~64 KiB ≈ 0.37 s of S16 stereo @44.1k)
     // keep feeding stale PCM from the OLD position into aplay even after the
     // player reset posFrames_ — exactly the "cursor moved but the sound
-    // catches up slowly / Stop keeps playing for a while" symptom. The bytes
-    // still queued in ALSA's own ring inside aplay are short (~period size)
-    // and unavoidable without killing the process.
+    // catches up slowly / Stop keeps playing for a while" symptom.
     if (!proc_) return;
+    const qint64 queued = proc_->bytesToWrite();
     flushedRecently_ = true;             // next spawn is "warm": skip stderr wait
     DBG(QStringLiteral("AudioPlayer: flushing sink '%1' pipe (%2 bytes queued)"
                        " — stale audio dropped")
-            .arg(program_)
-            .arg(proc_->bytesToWrite()));
+            .arg(program_).arg(queued));
     if (proc_->state() == QProcess::Running) {
-        proc_->closeWriteChannel();     // EOF: aplay drains and exits cleanly
-        if (!proc_->waitForFinished(500))
-            proc_->terminate();         // escalation only if it lingers
+        // Graceful EOF only makes sense when there is nothing left to drop:
+        // aplay then finishes draining and exits 0. But on a *forced* flush
+        // (click-to-seek / stop with an active session) the child may be
+        // blocked in snd_pcm_writei() with the kernel pipe + its ALSA ring
+        // still holding up to ~0.5 s of audio from the OLD position. Waiting
+        // for that drain here (waitForFinished(500) + synchronous reap) is
+        // what made every click freeze the UI for half a second before the
+        // cursor jumped. SIGINT interrupts aplay immediately (the resulting
+        // "Interrupted system call" unwind is treated as benign in
+        // shutdown()), so the respawn starts from the new position at once.
+        if (queued == 0 && !force) {
+            proc_->closeWriteChannel();  // EOF: aplay drains and exits cleanly
+            if (!proc_->waitForFinished(500))
+                proc_->terminate();      // escalation only if it lingers
+        } else {
+            proc_->terminate();          // instant interrupt, no drain wait
+            proc_->waitForFinished(150);
+            if (proc_->state() == QProcess::Running) proc_->kill();
+        }
     }
     delete proc_;                        // reap synchronously; no orphan
     proc_ = nullptr;
     started_ = false;                    // ensureStarted() respawns lazily
-    flushedRecently_ = true;             // next spawn is "warm": skip stderr wait
 }
 
 qint64 ProcessSink::writeData(const char *data, qint64 len) {

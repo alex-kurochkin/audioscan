@@ -485,14 +485,21 @@ void AudioPlayer::seek(qint64 frame) {
     } else if (outDevice_) {
         // Push mode: drop the buffered-but-not-yet-written PCM so the jump is
         // heard promptly; the timer pump simply feeds from the new position.
+        const bool hadQueued = !pumpBuf_.isEmpty();
         pumpBuf_.clear();
         // Also flush everything already handed to the external sink process:
         // its stdin pipe holds up to ~64 KiB of stale PCM from the OLD
         // position, which aplay would otherwise keep playing for hundreds of
         // milliseconds after the seek ("cursor moved, sound lags behind").
         // The ProcessSink respawns the child lazily on the next write.
+        // `force` when the player was actively running: even with 0 bytes
+        // queued in QProcess, the kernel pipe + aplay's ALSA ring still hold
+        // stale audio; waiting for that drain (old EOF path) froze the UI
+        // for ~500 ms per click before the cursor jumped. A forced flush
+        // interrupts the child instantly instead. While paused there is no
+        // live stream to interrupt — keep the cheap skip-if-empty behaviour.
         if (auto *ps = qobject_cast<ProcessSink *>(outDevice_))
-            ps->flushPipe();
+            ps->flushPipe(/*force=*/playing_ || hadQueued);
     }
     emit positionChanged(posFrames_);
 }
@@ -511,9 +518,12 @@ void AudioPlayer::stop() {
         // Stop must be *instantly* silent: close() only sends EOF, letting
         // aplay keep draining everything buffered in the pipe — audible for
         // up to ~64 KiB (~0.37 s) after the button press. Flush first, then
-        // close/delete as usual.
+        // close/delete as usual. `force`: interrupt even with 0 bytes queued
+        // on our side — the kernel pipe + aplay's ALSA ring still hold stale
+        // audio from the old position and must not keep playing (and must
+        // not make us wait for their drain before the cursor rewinds).
         if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
-            ps->flushPipe();
+            ps->flushPipe(/*force=*/hadSession);
             ps->waitForBytesWritten(50);  // nothing left queued after flush; no-op guard
         }
         pumpBuf_.clear();
