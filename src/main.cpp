@@ -2,6 +2,7 @@
 #include <QTimer>
 #include <QHeaderView>
 #include <QString>
+#include "AudioDebug.h"
 #include "MainWindow.h"
 #include "Settings.h"
 #include "Database.h"
@@ -68,6 +69,13 @@ int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("audioscout"));
     QCoreApplication::setOrganizationName(QStringLiteral("audioscout"));
+
+    // Always-on error logging: every qWarning()/qCritical() and DBG()
+    // diagnostic is appended to ~/.config/audioscout/logs/audioscout-<date>.log
+    // and mirrored to stderr. Install it before anything can fail (DB open,
+    // audio device probing) so the very first messages are captured too.
+    audioscout_log::install();
+    DBG(QStringLiteral("session start; log file: %1").arg(audioscout_log::logFilePath()));
 
     if (!Database::instance().open(Settings::instance().dbPath())) {
         qWarning("Failed to open database at %s",

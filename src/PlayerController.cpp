@@ -51,8 +51,21 @@ void PlayerController::playPauseInner() {
     // NOTE: audio_ points at MainWindow's AudioData *member*, which exists
     // whether or not a file is loaded, so it can never serve as a "file
     // loaded" test; use hasLoadedAudio() (backed by audio_.valid) for that.
-    if (!player_ || !view_ || !loopBtn_ || !playBtn_ || !ui_ ||
-        !hasLoadedAudio()) return;
+    if (!player_ || !view_ || !loopBtn_ || !playBtn_ || !ui_) {
+        DBG(QStringLiteral("playPause: BAIL OUT — unwired context "
+                           "(player=%1 view=%2 loopBtn=%3 playBtn=%4 ui=%5)")
+            .arg(!player_ ? "null" : "ok").arg(!view_ ? "null" : "ok")
+            .arg(!loopBtn_ ? "null" : "ok").arg(!playBtn_ ? "null" : "ok")
+            .arg(!ui_ ? "null" : "ok"));
+        return;
+    }
+    if (!hasLoadedAudio()) {
+        DBG(QStringLiteral("playPause: BAIL OUT — no loaded audio "
+                           "(audio ptr=%1 hasAudio provider=%2)")
+            .arg(audio_ ? "set" : "null")
+            .arg(hasAudio_ ? (hasAudio_() ? "true" : "FALSE") : "absent"));
+        return;
+    }
     if (player_->isPlaying()) {          // in-process Qt sink is running
         player_->pause();
         playBtn_->setText(QObject::tr("Play"));
@@ -201,7 +214,11 @@ void PlayerController::stopPlayback() {
 // Seek to a frame while playback is active, in whichever output path runs.
 // Called from the waveform click handler (AudioView::cursorMoved).
 void PlayerController::seekPlaybackTo(qint64 frame) {
-    if (!player_ || !view_ || !ui_ || !hasLoadedAudio()) return;
+    if (!player_ || !view_ || !ui_ || !hasLoadedAudio()) {
+        DBG(QStringLiteral("seekPlaybackTo(%1): ignored — unwired context "
+                           "or no loaded audio").arg(frame));
+        return;
+    }
 
     // In-process playback (Qt QAudioSink pull mode or pipe pump): jump the
     // position and keep playing/paused state as it is. The seek stays inside
@@ -250,7 +267,11 @@ void PlayerController::seekPlaybackTo(qint64 frame) {
 // file. While playback is active the range is re-armed immediately so
 // looping takes effect live.
 void PlayerController::onLoopToggled(bool on) {
-    if (!player_ || !view_ || !ui_ || !hasLoadedAudio()) return;
+    if (!player_ || !view_ || !ui_ || !hasLoadedAudio()) {
+        DBG(QStringLiteral("onLoopToggled(%1): ignored — unwired context "
+                           "or no loaded audio").arg(on));
+        return;
+    }
     const qint64 selStart = view_->selStart();
     const qint64 selEnd   = view_->selEnd();
     const bool hasSel     = view_->hasSelection();

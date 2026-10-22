@@ -117,8 +117,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         // Auto-load the files of the restored directory into the table.
         onDirSelected(dir);
     } else {
-        onDirSelected(QDir::homePath());
-        tree_->setCurrentIndex(fsModel_->index(QDir::homePath()));
+        // Dev/QA hook: AUDIOSCOUT_DIR=<path> opens that directory at startup
+        // (lets playback be exercised without a GUI session restore).
+        const QString envDir = QString::fromLocal8Bit(qgetenv("AUDIOSCOUT_DIR"));
+        const QString startDir = (!envDir.isEmpty() && QDir(envDir).exists())
+                                     ? envDir : QDir::homePath();
+        onDirSelected(startDir);
+        tree_->setCurrentIndex(fsModel_->index(startDir));
     }
 }
 
@@ -787,9 +792,15 @@ void MainWindow::onRowDoubleClicked() {
 
 void MainWindow::loadCurrentFile() {
     int row = currentRow();
-    if (row < 0 || row >= model_->rows().size()) return;
+    if (row < 0 || row >= model_->rows().size()) {
+        DBG(QStringLiteral("loadCurrentFile: no valid row (row=%1 rows=%2)")
+            .arg(row).arg(model_ ? model_->rows().size() : -1));
+        return;
+    }
     const auto &r = model_->rows()[row];
     if (r.broken) {   // actions unavailable for broken files (spec 3.3)
+        DBG(QStringLiteral("loadCurrentFile: row %1 marked broken: %2")
+            .arg(row).arg(r.path));
         audio_ = AudioData{};
         currentPath_.clear();
         view_->setData(nullptr);
@@ -800,6 +811,8 @@ void MainWindow::loadCurrentFile() {
     player_.stop();
     pc_->setLastPlayStartFrame(-1);   // per-file resume point resets on (re)load
     if (!AudioFile::load(r.path, audio_, &err)) {
+        qWarning() << "MainWindow: AudioFile::load FAILED for" << r.path
+                   << "-" << err;
         QMessageBox::warning(this, tr("Load failed"),
                              tr("Cannot open %1\n%2").arg(r.name, err));
         audio_ = AudioData{};
@@ -807,6 +820,9 @@ void MainWindow::loadCurrentFile() {
         updateActiveFileDisplay();
         return;
     }
+    DBG(QStringLiteral("loadCurrentFile: loaded %1 (valid=%2 frames=%3 rate=%4 ch=%5)")
+        .arg(r.path).arg(audio_.valid).arg(audio_.totalFrames)
+        .arg(audio_.sampleRate).arg(audio_.channels));
     currentPath_ = r.path;
     markers_ = Database::instance().loadMarkers(r.path);
     player_.setBuffer(audio_.samples.data(), audio_.totalFrames,
