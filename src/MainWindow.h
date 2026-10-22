@@ -119,6 +119,9 @@ private:
     void startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop);
     void stopFfmpegFallback();
     void resumeFfmpegFallback();
+    // Relaunch the running ffmpeg fallback at the current playhead with the
+    // newly stored volume (the external process reads gain only at startup).
+    void restartFfmpegFallbackWithVolume();
     // Seek during playback: moves the playhead and continues from the new
     // position in whichever output path is active (Qt sink, pipe fallback or
     // external ffmpeg process). No-op when nothing is playing.

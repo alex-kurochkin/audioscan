@@ -23,6 +23,13 @@ public:
     using SinkFactory = std::function<QIODevice *(const QAudioFormat &)>;
     void setSinkFactory(SinkFactory f) { sinkFactory_ = std::move(f); }
 
+    // Live volume changes for outputs whose gain is fixed at process spawn
+    // time (the aplay/ffplay pipe fallbacks): recreate the output device via
+    // the factory so it is spawned anew with the current volume, then resume
+    // feeding from the unchanged playback position. No-op in Qt-sink pull
+    // mode (volume is applied per-sample there). Called from the GUI thread.
+    void restartOutputKeepingPosition();
+
     // Set the whole decoded buffer (interleaved float32).
     void setBuffer(const float *data, qint64 totalFrames, int channels, int sampleRate);
 
@@ -94,6 +101,7 @@ private:
     FloatPcmDevice *device_ = nullptr;
     SinkFactory sinkFactory_;
     VolumeApplier volumeApplier_;
+    bool volumeApplierBusy_ = false;   // re-entrancy guard for device restarts
 
     // External-player fallback (aplay/ffplay pipe): push-mode pump.
     QIODevice *outDevice_ = nullptr;

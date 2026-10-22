@@ -158,7 +158,12 @@ static QStringList aplayArgsFor(const QAudioFormat &fmt, double volume) {
 }
 
 static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
-    auto *s = new ProcessSink(QStringLiteral("aplay"), aplayArgsFor(fmt, 1.0), parent);
+    // Spawn with the player's current volume (setVolumeApplier wires this up);
+    // live slider changes respawn the process via AudioPlayer::
+    // restartOutputKeepingPosition().
+    auto *ap = qobject_cast<AudioPlayer *>(parent);
+    const double v = ap ? ap->volume() : 1.0;
+    auto *s = new ProcessSink(QStringLiteral("aplay"), aplayArgsFor(fmt, v), parent);
     s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
     return s;
 }
@@ -455,7 +460,7 @@ void MainWindow::buildUi() {
     pb->addWidget(new QLabel(tr("Volume"), playerBar));
     pb->addWidget(volumeSlider_);
     pb->addSpacing(12);
-    pb->addWidget(new QLabel(tr("Display"), playerBar));
+    // No "Display" label: the toggle button alone shows the current mode.
     pb->addWidget(displayToggleBtn_);
     pb->addStretch(1);
     pb->addWidget(zin);
@@ -541,6 +546,20 @@ void MainWindow::buildUi() {
     // external stop), sync the button so it never sticks on "Pause".
     connect(&player_, &AudioPlayer::positionChanged, this,
             [this] { updatePlayButton(); });
+
+    // Loop-button highlight must follow *actual* loop activity: re-evaluate
+    // it whenever the player arms/disarms audible looping (start, stop,
+    // finish, toggle) — see updatePlayButton().
+    connect(&player_, &AudioPlayer::loopStateChanged, this,
+            [this](bool) { updatePlayButton(); });
+
+    // Live volume for push-mode outputs (aplay/ffplay pipe): those processes
+    // read their gain only at startup, so respawn them with the new value
+    // while keeping the playback position. Pull mode needs nothing: the PCM
+    // generator multiplies by the atomic volume_ on every chunk.
+    player_.setVolumeApplier([this](double) {
+        player_.restartOutputKeepingPosition();
+    });
 
     // Audio output strategy: prefer Qt Multimedia's own QAudioSink; if the
     // default device is null or rejects our format, fall back to piping raw
@@ -1144,6 +1163,27 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
 void MainWindow::resumeFfmpegFallback() {
     startFfmpegFallback(fbStartFrame_, fbEndFrame_, fbLooping_);
     if (playProc_) playBtn_->setText(tr("Pause"));
+}
+
+// Restart the running ffmpeg fallback at the current playhead position with
+// the freshly stored volume. ffmpeg has no live gain control, so the only way
+// to make the volume slider affect this output path is to relaunch the
+// process from where playback currently is, preserving range end and loop.
+void MainWindow::restartFfmpegFallbackWithVolume() {
+    if (!playProc_ || !wasPlaying_) return;
+    const bool loop = fbLooping_;
+    const qint64 end = fbEndFrame_;
+    qint64 cur = view_->playheadFrame();
+    if (cur < fbStartFrame_ || cur >= end) cur = fbStartFrame_;
+    stopFfmpegFallback();              // kills proc, clears resume state
+    startFfmpegFallback(cur, end, loop);
+    if (playProc_) {
+        playBtn_->setText(tr("Pause"));
+        view_->setPlayheadFrame(cur);
+    } else {
+        playBtn_->setText(tr("Play"));
+        statusBar()->showMessage(tr("Volume change failed (external player could not restart)"), 4000);
+    }
 }
 
 void MainWindow::stopFfmpegFallback() {

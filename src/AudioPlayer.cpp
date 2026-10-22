@@ -27,7 +27,53 @@ void AudioPlayer::setVolume(double v) {
     // Devices whose gain is fixed at startup (the "aplay" pipe fallback)
     // must be reconfigured live; the in-process float/Int16 paths read
     // volume_ directly on every generated chunk, so they need nothing more.
-    if (volumeApplier_) volumeApplier_(v);
+    if (volumeApplier_ && !volumeApplierBusy_) volumeApplier_(v);
+}
+
+// Recreate the push-mode output device (spawning the aplay/ffplay child
+// process anew with the current volume) and resume feeding from the same
+// playback position. Only meaningful while a session is active in pump mode.
+void AudioPlayer::restartOutputKeepingPosition() {
+    if (!outDevice_ || qtSinkMode_) return;
+    const bool wasPlaying = playing_;
+    const bool wasPaused = paused_;
+    if (!wasPlaying && !wasPaused) return;
+
+    // Re-entrancy guard: setVolume below (from play()) must not recurse
+    // back into this function while we are mid-restart.
+    volumeApplierBusy_ = true;
+    if (pump_) pump_->stop();
+    outDevice_->close();
+    delete outDevice_;
+    outDevice_ = nullptr;
+    pumpBuf_.clear();
+
+    auto failSession = [this] {
+        playing_ = false; paused_ = false;
+        emit loopStateChanged(false);
+        emit finished();
+    };
+    if (!sinkFactory_) { volumeApplierBusy_ = false; failSession(); return; }
+    outDevice_ = sinkFactory_(outFmt_);
+    if (!outDevice_) {
+        qWarning() << "AudioPlayer: sink factory returned null on volume restart";
+        volumeApplierBusy_ = false;
+        failSession();
+        return;
+    }
+
+    if (wasPlaying) {
+        playing_ = true; paused_ = false;
+        if (!pump_) {
+            pump_ = new QTimer(this);
+            connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
+        }
+        pump_->start(pumpPeriodMs_);
+    } else {
+        playing_ = false; paused_ = true;   // stay paused; resume() will restart
+    }
+    emit loopStateChanged(isLoopActive());
+    volumeApplierBusy_ = false;
 }
 
 void AudioPlayer::setLooping(bool on) {
