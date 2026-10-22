@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+# Debhelper + CMake packaging for AudioScout.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release
+
+override_dh_missing:
+	dh_missing --fail-missing

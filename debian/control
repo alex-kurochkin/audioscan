@@ -1,0 +1,32 @@
+Source: audioscout
+Section: sound
+Priority: optional
+Maintainer: AudioScout Developer <dev@audioscout.local>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.16),
+               qt6-base-dev,
+               qt6-multimedia-dev,
+               libqt6sql6-sqlite,
+               libsndfile1-dev,
+               libtag1-dev,
+               pkg-config
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: audioscout
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         libqt6sql6-sqlite,
+         libsndfile1,
+         ffmpeg,
+         alsa-utils
+Recommends: libtag1v5
+Description: Fast audio catalog listening and editing
+ AudioScout scans a directory tree of audio files, shows waveform and
+ spectrogram previews, supports markers, range selection, looping
+ playback, in-place editing (mute, normalize, delete selection) with
+ disk-backed undo/redo, hotkeys and per-user settings stored in
+ config.json and an SQLite database.
+ .
+ Playback uses Qt Multimedia with external helpers (ffplay from ffmpeg,
+ aplay from alsa-utils) as fallback decoders for compressed formats.

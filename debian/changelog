@@ -1,0 +1,10 @@
+audioscout (1.0.0-1) unstable; urgency=medium
+
+  * Initial release: AudioScout - fast audio catalog listening and editing.
+    Includes session restore, column settings persistence (config.json),
+    waveform/spectrogram previews, markers, undo/redo and ffmpeg fallbacks.
+
+  * Packaging: debhelper + CMake build with runtime dependencies on
+    libsndfile1, libtag1v5, ffmpeg and alsa-utils (aplay playback helper).
+
+ -- AudioScout Developer <dev@audioscout.local>  Thu, 22 Oct 2026 09:30:00 +0000

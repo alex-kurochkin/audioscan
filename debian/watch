@@ -1,0 +1,2 @@
+version=4
+https://github.com/alex-kurochkin/audioscan/tags .*/(?:archive|releases).*?v?(\d[\d.]*)\.tar\.gz
