@@ -110,7 +110,7 @@ void ProcessSink::shutdown() {
     }
 }
 
-QStringList aplayArgsFor(const QAudioFormat &fmt, double volume) {
+QStringList aplayArgsFor(const QAudioFormat &fmt, double /*volume*/) {
     auto tag = [](QAudioFormat::SampleFormat sf) -> QString {
         switch (sf) {
         case QAudioFormat::Int16: return QStringLiteral("S16_LE");
@@ -125,24 +125,21 @@ QStringList aplayArgsFor(const QAudioFormat &fmt, double volume) {
          << "-c" << QString::number(fmt.channelCount())
          << "-r" << QString::number(fmt.sampleRate())
          << "-f" << tag(fmt.sampleFormat());
-    // aplay applies its own hardware-independent gain; the in-process float
-    // path multiplies by volume_ directly, so do the same here. 0 dB = full
-    // scale; anything above 0 dB clips, so clamp to it.
-    const double db = volume >= 0.999 ? 0.0
-                     : 20.0 * std::log10(std::max(volume, 0.0005));
-    args << "-v" << QString::number(db, 'f', 1);
+    // NOTE: no volume flag here on purpose. Debian/Ubuntu ship alsa-utils
+    // patched with --disable-softvol, so their aplay has neither -V nor -v
+    // ("aplay: invalid option -- '1'" was exactly that: our dB value like
+    // "-6.0" reached getopt and '-6'/'-1' were parsed as bogus short
+    // options). The gain is applied in-process instead — generateBytes()
+    // multiplies every PCM chunk by the player's atomic volume before it
+    // reaches the pipe — so aplay runs at unity gain and the slider keeps
+    // working live without respawning the child.
     return args;
 }
 
 QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
-    // Spawn with the player's current volume (setVolumeApplier wires this up);
-    // live slider changes respawn the process via AudioPlayer::
-    // restartOutputKeepingPosition().
     const QString prog = resolveProgram(QStringLiteral("aplay"));
     if (prog.isEmpty()) return nullptr;   // alsa-utils not installed
-    auto *ap = qobject_cast<AudioPlayer *>(parent);
-    const double v = ap ? ap->volume() : 1.0;
-    auto *s = new ProcessSink(prog, aplayArgsFor(fmt, v), parent);
+    auto *s = new ProcessSink(prog, aplayArgsFor(fmt, 1.0), parent);
     s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
     return s;
 }
@@ -157,6 +154,9 @@ QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
     const QString sf = fmt.sampleFormat() == QAudioFormat::Float
                            ? QStringLiteral("f32le")
                            : QStringLiteral("s16le");
+    // Volume is applied in-process by AudioPlayer::generateBytes() before
+    // the bytes reach this pipe, so ffplay needs no gain handling of its
+    // own and live slider changes need no respawn.
     args << "-nodisp" << "-loglevel" << "quiet"
          << "-f" << sf
          << "-ar" << QString::number(fmt.sampleRate())

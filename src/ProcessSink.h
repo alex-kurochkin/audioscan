@@ -16,8 +16,7 @@ public:
 
     // Restart the child process with an updated argument list while keeping
     // the same object identity (AudioPlayer deletes this device only when it
-    // replaces it). Used for live volume changes on "aplay", whose -volume is
-    // fixed at spawn time. The next writeData() respawns lazily with newArgs.
+    // replaces it). The next writeData() respawns lazily with newArgs.
     void restartWithArgs(const QStringList &newArgs);
 
 protected:
@@ -33,8 +32,10 @@ private:
     QProcess *proc_ = nullptr;
 };
 
-// Build the "aplay" raw-PCM argument list for a format and linear volume.
-QStringList aplayArgsFor(const QAudioFormat &fmt, double volume);
+// Build the "aplay" raw-PCM argument list for a format. The volume parameter
+// is vestigial (ignored): Ubuntu's alsa-utils is built --disable-softvol and
+// its aplay has no gain flag; gain is applied in-process before the pipe.
+QStringList aplayArgsFor(const QAudioFormat &fmt, double volume = 1.0);
 // Create an opened write-only sink piping PCM to "aplay" (ALSA) or "ffplay".
 QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent);
 QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent);

@@ -166,7 +166,7 @@ void PlayerController::playPauseInner() {
     // If the sink dies right away (e.g. no plugin, device busy) we detect it
     // after a short delay and transparently switch to the direct ffmpeg path
     // so the button never just "blinks".
-    DBG(QStringLiteral("playPause: trying Qt sink, start=%1 end=%2 loop=%3 sel=%4")
+    DBG(QStringLiteral("playPause: starting in-process playback (Qt sink or ALSA pipe), start=%1 end=%2 loop=%3 sel=%4")
         .arg(start).arg(end).arg(loop).arg(view_->hasSelection()));
     player_->play(start, end, loop);
     lastPlayStartFrame_ = start;   // remember where this session began (Stop/Play resume point)
