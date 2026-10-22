@@ -9,6 +9,8 @@
 #include <QDoubleSpinBox>
 #include <QFileSystemModel>
 #include <QElapsedTimer>
+#include <QHash>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QLabel>
@@ -79,6 +81,9 @@ private:
     void sortByModelColumn(int modelCol, Qt::SortOrder order);  // sort + indicator/selection sync
     void updateSortIndicator();      // keep the header arrow on the right visual section
     void saveColumnLayout();         // persist column order/visibility to settings
+    void applySavedColumnOrder();    // restore visual header order from settings on startup
+    void saveColumnWidths();         // persist per-column widths to the SQLite session table
+    void loadColumnWidths();         // read persisted widths into memory (once)
     void requestPreview(int row);
     bool editGuarded();          // checks editable format + write perms
     void persistMarkers();
@@ -135,6 +140,8 @@ private:
     // Session restore (spec 10.2): last file/position are applied after the
     // directory scan completes, since rows only exist then.
     QString pendingSessionFile_;
+    QHash<int, int> colWidths_;   // model column id -> persisted width (SQLite session)
+    QTimer colWidthSaveTimer_;    // debounce for saveColumnWidths()
     double  pendingSessionPosSec_ = 0.0;
     qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
     QElapsedTimer fbClock_;             // timing for fbElapsedMs_

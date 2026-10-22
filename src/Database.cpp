@@ -202,3 +202,21 @@ void Database::getSessionState(QString &dir, QString &file, double &positionSec)
         else if (k == QLatin1String("lastPos")) positionSec = q.value(1).toDouble();
     }
 }
+
+// ---------- Generic key/value session entries ----------
+
+void Database::setSessionValue(const QString &key, const QString &value) {
+    QSqlQuery q(db_);
+    q.prepare(QStringLiteral(
+        "INSERT INTO session(key,value) VALUES(?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value"));
+    q.addBindValue(key); q.addBindValue(value); q.exec();
+}
+
+QString Database::sessionValue(const QString &key) {
+    QSqlQuery q(db_);
+    q.prepare(QStringLiteral("SELECT value FROM session WHERE key=?"));
+    q.addBindValue(key);
+    if (q.exec() && q.next()) return q.value(0).toString();
+    return QString();
+}

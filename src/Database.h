@@ -32,6 +32,10 @@ public:
     void setSessionState(const QString &dir, const QString &file, double positionSec);
     void getSessionState(QString &dir, QString &file, double &positionSec);
 
+    // ---- Generic key/value session entries (column widths, ...) ----
+    void setSessionValue(const QString &key, const QString &value);
+    QString sessionValue(const QString &key);
+
 private:
     Database() = default;
     QSqlDatabase db_;

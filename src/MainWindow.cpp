@@ -14,6 +14,9 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QSet>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -214,6 +217,19 @@ public:
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     buildUi();
+    // Debounced writer for user-resized column widths (SQLite session table).
+    colWidthSaveTimer_.setSingleShot(true);
+    connect(&colWidthSaveTimer_, &QTimer::timeout, this, [this] {
+        saveColumnWidths();
+        // Keep the in-memory copy in sync so a later re-scan restores them.
+        if (table_ && model_) {
+            auto *hdr = table_->horizontalHeader();
+            const auto &visCols = model_->visibleColumns();
+            for (int log = 0; log < visCols.size(); ++log)
+                if (!hdr->isSectionHidden(log))
+                    colWidths_.insert(visCols[log], table_->columnWidth(log));
+        }
+    });
     applyHotkeys();
     connect(&Settings::instance(), &Settings::changed, this, &MainWindow::applyHotkeys);
 
@@ -281,6 +297,8 @@ void MainWindow::closeEvent(QCloseEvent *e) {
     // Persist the final header order (drag-reorder done right before closing
     // is saved on every sectionMoved, but this guarantees the last state).
     saveColumnLayout();
+    colWidthSaveTimer_.stop();      // flush any pending width save below
+    saveColumnWidths();
     // Only persist the session we actually own: if startup restored a stale
     // lastFile that was never loaded (user didn't touch anything), keep it
     // untouched instead of clobbering good state with an empty one.
@@ -443,6 +461,15 @@ void MainWindow::buildUi() {
     // columns (visible + hidden) so it survives restarts.
     connect(table_->horizontalHeader(), &QHeaderView::sectionMoved,
             this, [this] { saveColumnLayout(); applyTableColumnWidths(); updateSortIndicator(); });
+    // Persist user-resized column widths (debounced) — restored on the next
+    // start from the SQLite session table.
+    connect(table_->horizontalHeader(), &QHeaderView::sectionResized, this,
+            [this](int /*logical*/, int /*oldSize*/, int newSize) {
+                if (newSize <= 0 || !model_) return;   // hide/reset noise
+                const auto &visCols = model_->visibleColumns();
+                if (visCols.isEmpty()) return;         // no rows yet: nothing to store
+                colWidthSaveTimer_.start(300);
+            });
     connect(model_, &QAbstractItemModel::modelReset,
             this, [this] { QTimer::singleShot(0, this, [this] { applyTableColumnWidths(); }); });
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
@@ -805,6 +832,65 @@ void MainWindow::saveColumnLayout() {
     Settings::instance().setVisibleColumns(shownKeys);
 }
 
+// Re-apply the persisted visual order of the header sections after a model
+// reset (directory scan). moveSection() is idempotent: if the header already
+// matches the saved order, no sectionMoved signal fires and nothing changes.
+void MainWindow::applySavedColumnOrder() {
+    if (!table_ || !model_) return;
+    auto *hdr = table_->horizontalHeader();
+    const QStringList fullKeys = Settings::instance().columnOrder();
+    if (fullKeys.isEmpty()) return;
+    const auto &visCols = model_->visibleColumns();
+    QVector<int> targetVis;   // logical indices in the desired visual order
+    for (const QString &key : fullKeys) {
+        const int col = FileTableModel::columnFromKey(key);
+        if (col < 0) continue;
+        const int log = visCols.indexOf(col);
+        if (log >= 0 && !targetVis.contains(log)) targetVis << log;
+    }
+    for (int log = 0; log < visCols.size(); ++log)
+        if (!targetVis.contains(log)) targetVis << log;   // unseen columns last
+    for (int target = 0; target < targetVis.size(); ++target) {
+        const int cur = hdr->visualIndex(targetVis[target]);
+        if (cur != target) hdr->moveSection(cur, target);
+    }
+}
+
+// Read the per-column widths stored in the SQLite session table (once per
+// run — the DB does not change while we are running).
+void MainWindow::loadColumnWidths() {
+    static bool loaded = false;
+    if (loaded) return;
+    loaded = true;
+    const QString json = Database::instance().sessionValue(QStringLiteral("colWidths"));
+    if (json.isEmpty()) return;
+    const QJsonObject obj = QJsonDocument::fromJson(json.toUtf8()).object();
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        bool ok = false;
+        const int col = it.key().toInt(&ok);
+        const int w = it.value().toInt();
+        if (ok && col >= 0 && col < int(FileTableModel::ColCount) && w > 0)
+            colWidths_.insert(col, w);
+    }
+}
+
+// Persist the current width of every visible column to the SQLite session
+// table so user-resized columns keep their size across restarts.
+void MainWindow::saveColumnWidths() {
+    if (!table_ || !model_) return;
+    auto *hdr = table_->horizontalHeader();
+    const auto &visCols = model_->visibleColumns();
+    QJsonObject obj;
+    for (int log = 0; log < visCols.size(); ++log) {
+        if (hdr->isSectionHidden(log)) continue;
+        obj.insert(QString::number(visCols[log]),
+                   table_->columnWidth(log));
+    }
+    Database::instance().setSessionValue(
+        QStringLiteral("colWidths"),
+        QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+}
+
 // ---------------- hotkeys ----------------
 
 void MainWindow::applyHotkeys() {
@@ -918,6 +1004,14 @@ void MainWindow::onScanFinished(DirScanResult res) {
         .arg(res.dir).arg(res.rows.size()).arg(ok).arg(brokenCnt));
     model_->setRows(res.rows);
     sortByModelColumn(model_->sortColumn(), model_->sortOrder());
+    // Restore the persisted header order and column widths of the file
+    // table (spec 2.4): every directory scan resets the model, so apply
+    // them here right after each scan instead of only once at startup.
+    QTimer::singleShot(0, this, [this] {
+        applySavedColumnOrder();
+        loadColumnWidths();
+        applyTableColumnWidths();
+    });
     // lazy prefetch of first N previews (spec 2.4)
     int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(res.rows.size()));
     const QString mode = Settings::instance().tablePreviewMode();
@@ -974,8 +1068,13 @@ void MainWindow::applyTableColumnWidths() {
         int logical = table_->horizontalHeader()->logicalIndex(vis);
         if (logical < 0) continue;
         int modelCol = model_->visibleColumns().value(logical, -1);
-        if (modelCol >= 0 && modelCol < int(FileTableModel::ColCount))
-            table_->setColumnWidth(logical, kColW[modelCol]);
+        if (modelCol >= 0 && modelCol < int(FileTableModel::ColCount)) {
+            // User-resized width wins over the built-in default (spec: sizes
+            // persist across restarts; stored in the SQLite session table).
+            const int w = colWidths_.value(modelCol, kColW[modelCol]);
+            if (table_->columnWidth(logical) != w)
+                table_->setColumnWidth(logical, w);
+        }
     }
 }
 
