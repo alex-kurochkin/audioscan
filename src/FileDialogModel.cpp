@@ -3,16 +3,17 @@
 
 static const char *kColumnTitles[] = {
     "Name", "Preview", "Duration", "Sample Rate", "Sample Type",
-    "Channels", "Size", "Comment", "Date Created", "Date Modified"};
+    "Channels", "Size", "Comment", "Date Created", "Date Modified", ""};
 static const char *kColumnKeys[] = {
     "name","preview","duration","samplerate","sampletype",
-    "channels","size","comment","created","modified"};
+    "channels","size","comment","created","modified","folder"};
 
 FileTableModel::FileTableModel(QObject *parent) : QAbstractTableModel(parent) {
-    for (int i = 0; i < ColCount; ++i) visibleCols_ << i;
+    for (int i = 0; i <= ColModified; ++i) visibleCols_ << i;   // Folder retired
 }
 
 QString FileTableModel::columnName(int col) const {
+    if (!isLiveColumn(col)) return {};   // retired Folder column has no title
     return QString::fromLatin1(kColumnTitles[std::clamp(col, 0, int(ColCount) - 1)]);
 }
 QString FileTableModel::columnKey(int col) {
@@ -53,7 +54,10 @@ QImage FileTableModel::previewAt(int row) const {
 
 void FileTableModel::updateVisibleColumns(const QVector<int> &orderedVisibleCols) {
     beginResetModel();
-    visibleCols_ = orderedVisibleCols;
+    // The Folder column is retired — never let it back into the visible set.
+    visibleCols_.clear();
+    for (int col : orderedVisibleCols)
+        if (isLiveColumn(col)) visibleCols_ << col;
     endResetModel();
 }
 
@@ -67,6 +71,7 @@ int FileTableModel::columnCount(const QModelIndex &parent) const {
 
 QVariant FileTableModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() >= rows_.size()) return {};
+    if (index.column() < 0 || index.column() >= visibleCols_.size()) return {};
     int col = visibleCols_[index.column()];
     const Row &r = rows_[index.row()];
 
@@ -121,6 +126,7 @@ QVariant FileTableModel::data(const QModelIndex &index, int role) const {
 
 QVariant FileTableModel::headerData(int section, Qt::Orientation o, int role) const {
     if (o != Qt::Horizontal || role != Qt::DisplayRole) return {};
+    if (section < 0 || section >= visibleCols_.size()) return {};
     return columnName(visibleCols_[section]);
 }
 
@@ -136,6 +142,7 @@ Qt::ItemFlags FileTableModel::flags(const QModelIndex &index) const {
 
 void FileTableModel::sortByModelColumn(int modelCol, Qt::SortOrder order) {
     const int column = modelCol;
+    if (!isLiveColumn(column)) return;   // retired Folder column: not sortable
     if (column == ColPreview || column == ColComment) return;   // forbidden per spec
     sortCol_ = column; sortOrder_ = order;
     std::stable_sort(rows_.begin(), rows_.end(), [&](const Row &a, const Row &b) {

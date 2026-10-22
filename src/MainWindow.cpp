@@ -666,24 +666,25 @@ void MainWindow::rebuildColumnMenu() {
     QVector<int> visible;
     for (const QString &key : order) {
         int col = FileTableModel::columnFromKey(key);
-        if (col >= 0) visible << col;
+        // The Folder column is retired — drop it even if an old settings
+        // file still lists it.
+        if (col >= 0 && FileTableModel::isLiveColumn(col)) visible << col;
     }
-    for (int c = 0; c < int(FileTableModel::ColCount); ++c)
+    for (int c = 0; c <= int(FileTableModel::ColModified); ++c)
         if (!visible.contains(c)) visible << c;
 
-    for (int c = 0; c < int(FileTableModel::ColCount); ++c) {
+    // Only live columns appear in the toggle menu (no Folder entry).
+    for (int c = 0; c <= int(FileTableModel::ColModified); ++c) {
         auto *act = menu->addAction(model_->columnName(c));
         act->setCheckable(true);
+        act->setData(c);                       // model column id, not index
         act->setChecked(visible.contains(c));
     }
-    connect(menu, &QMenu::aboutToShow, this, [this, menu] {
-        // sync check states from settings
-    });
     connect(menu, &QMenu::triggered, this, [this, menu](QAction *) {
         QVector<int> vis;
         const auto acts = menu->actions();
-        for (int cc = 0; cc < acts.size(); ++cc)
-            if (acts[cc]->isChecked()) vis << cc;
+        for (auto *a : acts)
+            if (a->isChecked()) vis << a->data().toInt();
         model_->updateVisibleColumns(vis);
         QStringList keys;
         for (int cc : vis) keys << FileTableModel::columnKey(cc);

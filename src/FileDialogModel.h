@@ -8,10 +8,16 @@
 class FileTableModel : public QAbstractTableModel {
     Q_OBJECT
 public:
+    // NB: ColFolder is a *retired* column id kept only so that persisted
+    // settings / sort state referring to it decode harmlessly. It is never
+    // part of the visible set and has no data or header (see below).
     enum Column {
         ColName = 0, ColPreview, ColDuration, ColSampleRate, ColSampleType,
-        ColChannels, ColSize, ColComment, ColCreated, ColModified, ColCount
+        ColChannels, ColSize, ColComment, ColCreated, ColModified,
+        ColFolder, ColCount
     };
+
+    static bool isLiveColumn(int col) { return col >= ColName && col <= ColModified; }
 
     struct Row {
         QString path, name;

@@ -119,7 +119,11 @@ void Settings::setPreviewPrefetchCount(int n) { setValue(QStringLiteral("preview
 QStringList Settings::visibleColumns() const {
     QStringList def = {"name","preview","duration","samplerate","sampletype",
                        "channels","size","comment","created","modified"};
-    return value(QStringLiteral("columns/order"), def).toStringList();
+    QStringList cols = value(QStringLiteral("columns/order"), def).toStringList();
+    // The Folder column was removed from the browser — strip it from any
+    // settings saved by older versions.
+    cols.removeAll(QStringLiteral("folder"));
+    return cols;
 }
 void Settings::setVisibleColumns(const QStringList &cols) {
     setValue(QStringLiteral("columns/order"), cols);
