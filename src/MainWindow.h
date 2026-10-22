@@ -36,6 +36,12 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
+#ifdef AUDIOSCOUT_TESTING
+    // Test hooks (only compiled with -DAUDIOSCOUT_TESTING).
+    QTableView *testTable() const { return table_; }
+    FileTableModel *testModel() const { return model_; }
+#endif
+
 protected:
     void closeEvent(QCloseEvent *) override;
 
@@ -72,6 +78,7 @@ private:
     void applyTableColumnWidths();   // per-model-column widths after reset/move
     void sortByModelColumn(int modelCol, Qt::SortOrder order);  // sort + indicator/selection sync
     void updateSortIndicator();      // keep the header arrow on the right visual section
+    void saveColumnLayout();         // persist column order/visibility to settings
     void requestPreview(int row);
     bool editGuarded();          // checks editable format + write perms
     void persistMarkers();

@@ -35,3 +35,8 @@ target_link_libraries(audioscout PRIVATE
 
 install(TARGETS audioscout RUNTIME DESTINATION bin)
 install(FILES resources/audioscout.desktop DESTINATION share/applications)
+
+option(AUDIOSCOUT_TESTING "Enable in-process test hooks (dev builds only)" OFF)
+if(AUDIOSCOUT_TESTING)
+    target_compile_definitions(audioscout PRIVATE AUDIOSCOUT_TESTING)
+endif()

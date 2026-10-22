@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QSet>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -277,6 +278,9 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     player_.stop();
+    // Persist the final header order (drag-reorder done right before closing
+    // is saved on every sectionMoved, but this guarantees the last state).
+    saveColumnLayout();
     // Only persist the session we actually own: if startup restored a stale
     // lastFile that was never loaded (user didn't touch anything), keep it
     // untouched instead of clobbering good state with an empty one.
@@ -435,8 +439,10 @@ void MainWindow::buildUi() {
     });
     // After a header drag-reorder or any model reset/sort, re-apply sensible
     // widths to the visual sections (model columns may have moved around).
+    // After a header drag-reorder, persist the new visual order of *all*
+    // columns (visible + hidden) so it survives restarts.
     connect(table_->horizontalHeader(), &QHeaderView::sectionMoved,
-            this, [this] { applyTableColumnWidths(); updateSortIndicator(); });
+            this, [this] { saveColumnLayout(); applyTableColumnWidths(); updateSortIndicator(); });
     connect(model_, &QAbstractItemModel::modelReset,
             this, [this] { QTimer::singleShot(0, this, [this] { applyTableColumnWidths(); }); });
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
@@ -720,25 +726,44 @@ void MainWindow::buildUi() {
 
 void MainWindow::rebuildColumnMenu() {
     auto *menu = new QMenu(columnsBtn_);
-    const QStringList order = Settings::instance().visibleColumns();
-    QVector<int> visible;
-    for (const QString &key : order) {
+    // Start from the persisted *full* order (all columns, visible + hidden)
+    // so that a drag-reorder of hidden columns is remembered too; fall back
+    // to the legacy visible-only key for old settings files.
+    QStringList fullKeys = Settings::instance().columnOrder();
+    if (fullKeys.isEmpty()) fullKeys = Settings::instance().visibleColumns();
+    QVector<int> fullOrder;
+    for (const QString &key : fullKeys) {
         int col = FileTableModel::columnFromKey(key);
         // The Folder column is retired — drop it even if an old settings
         // file still lists it.
-        if (col >= 0 && FileTableModel::isLiveColumn(col)) visible << col;
+        if (col >= 0 && FileTableModel::isLiveColumn(col) && !fullOrder.contains(col))
+            fullOrder << col;
     }
     for (int c = 0; c <= int(FileTableModel::ColModified); ++c)
-        if (!visible.contains(c)) visible << c;
+        if (!fullOrder.contains(c)) fullOrder << c;
 
-    // Only live columns appear in the toggle menu (no Folder entry).
-    for (int c = 0; c <= int(FileTableModel::ColModified); ++c) {
+    // Visible set: intersection with the legacy visible-columns key, so an
+    // upgrade from older configs keeps exactly the previously shown columns.
+    const QStringList visKeys = Settings::instance().visibleColumns();
+    QSet<int> shown;
+    if (!visKeys.isEmpty()) {
+        for (const QString &key : visKeys) {
+            int col = FileTableModel::columnFromKey(key);
+            if (col >= 0 && FileTableModel::isLiveColumn(col)) shown.insert(col);
+        }
+    } else {
+        for (int c : fullOrder) shown.insert(c);
+    }
+
+    // Menu actions in the persisted full order -> toggling preserves relative
+    // positions and lets newly-shown columns land where the user left them.
+    for (int c : fullOrder) {
         auto *act = menu->addAction(model_->columnName(c));
         act->setCheckable(true);
         act->setData(c);                       // model column id, not index
-        act->setChecked(visible.contains(c));
+        act->setChecked(shown.contains(c));
     }
-    connect(menu, &QMenu::triggered, this, [this, menu](QAction *) {
+    connect(menu, &QMenu::triggered, this, [this, menu] {
         QVector<int> vis;
         const auto acts = menu->actions();
         for (auto *a : acts)
@@ -747,8 +772,37 @@ void MainWindow::rebuildColumnMenu() {
         QStringList keys;
         for (int cc : vis) keys << FileTableModel::columnKey(cc);
         Settings::instance().setVisibleColumns(keys);
+        QStringList allKeys;
+        for (auto *a : acts) allKeys << FileTableModel::columnKey(a->data().toInt());
+        Settings::instance().setColumnOrder(allKeys);
     });
     columnsBtn_->setMenu(menu);
+}
+
+// Persist the current visual order of all live columns (visible ones first,
+// in header order; hidden ones appended in their last known relative order).
+void MainWindow::saveColumnLayout() {
+    if (!table_ || !model_) return;
+    auto *hdr = table_->horizontalHeader();
+    const auto &visCols = model_->visibleColumns();
+    QStringList visibleOrder;
+    for (int log = 0; log < visCols.size(); ++log) {
+        const int v = hdr->visualIndex(log);
+        if (v < 0) continue;
+        visibleOrder << QStringLiteral("%1:%2").arg(v).arg(FileTableModel::columnKey(visCols.value(log)));
+    }
+    std::sort(visibleOrder.begin(), visibleOrder.end());
+    QStringList shownKeys;
+    for (const QString &s : visibleOrder) shownKeys << s.section(':', 1);
+
+    // Keep hidden columns in their previously saved relative order.
+    QStringList prevFull = Settings::instance().columnOrder();
+    if (prevFull.isEmpty()) prevFull = Settings::instance().visibleColumns();
+    QStringList full = shownKeys;
+    for (const QString &k : prevFull)
+        if (!full.contains(k)) full << k;
+    Settings::instance().setColumnOrder(full);
+    Settings::instance().setVisibleColumns(shownKeys);
 }
 
 // ---------------- hotkeys ----------------

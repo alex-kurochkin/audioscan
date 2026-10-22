@@ -130,6 +130,18 @@ void Settings::setVisibleColumns(const QStringList &cols) {
     emit changed();
 }
 
+QStringList Settings::columnOrder() const {
+    QStringList def = {"name","preview","duration","samplerate","sampletype",
+                       "channels","size","comment","created","modified"};
+    QStringList cols = value(QStringLiteral("columns/fullOrder"), def).toStringList();
+    cols.removeAll(QStringLiteral("folder"));
+    return cols;
+}
+void Settings::setColumnOrder(const QStringList &cols) {
+    setValue(QStringLiteral("columns/fullOrder"), cols);
+    emit changed();
+}
+
 QString Settings::defaultShortcut(const QString &id) const { return kDefaultHotkeys.value(id); }
 
 QString Settings::shortcut(const QString &actionId) const {

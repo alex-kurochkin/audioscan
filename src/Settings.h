@@ -37,8 +37,12 @@ public:
     int previewPrefetchCount() const;   // default 30
     void setPreviewPrefetchCount(int n);
 
-    QStringList visibleColumns() const; // ordered column keys
+    QStringList visibleColumns() const; // ordered column keys (visible ones)
     void setVisibleColumns(const QStringList &cols);
+    // Full display order of *all* columns (visible + hidden), so that the
+    // user's drag-reorder survives restarts even for currently hidden cols.
+    QStringList columnOrder() const;
+    void setColumnOrder(const QStringList &cols);
 
     // Hotkeys: action id -> shortcut string (defaults if unset).
     QString shortcut(const QString &actionId) const;
