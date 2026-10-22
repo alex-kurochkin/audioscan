@@ -37,7 +37,25 @@ qint64 ProcessSink::readData(char *, qint64) { return 0; }
 
 qint64 ProcessSink::writeData(const char *data, qint64 len) {
     if (!ensureStarted()) return -1;
-    proc_->write(data, len);
+    // A child that is blocked in snd_pcm_writei() (device underrun/busy) can
+    // leave our side of the pipe full: then write() returns 0 bytes and
+    // waitForBytesWritten() times out. Returning 0 (not len!) keeps
+    // QIODevice's buffered writer from discarding the rest of the chunk —
+    // the caller simply retries the same bytes on the next pump tick.
+    const qint64 written = proc_->write(data, len);
+    if (written <= 0) {
+        if (proc_->state() == QProcess::NotRunning) {
+            qWarning().noquote() << QStringLiteral("AudioPlayer: sink '%1' died (exitCode=%2)")
+                                        .arg(program_).arg(proc_->exitCode());
+            return -1;
+        }
+        qWarning().noquote() << QStringLiteral("AudioPlayer: sink '%1' pipe stalled"
+                                              " (write returned %2, buffer=%3)")
+                                    .arg(program_)
+                                    .arg(written)
+                                    .arg(proc_->bytesToWrite());
+        return 0;   // transient back-pressure: retry later with the same data
+    }
     proc_->waitForBytesWritten(500);
     // A dead child (e.g. "aplay: not found" — QProcess::start() succeeds even
     // when execvp fails; the failure only surfaces asynchronously as
@@ -137,8 +155,15 @@ void ProcessSink::shutdown() {
     proc_->closeWriteChannel();
     proc_->waitForFinished(300);
     if (proc_->state() == QProcess::Running) {
+        // SIGTERM first, then a *long* grace period: aplay blocks in
+        // snd_pcm_writei() waiting for our pipe data; when the write end
+        // closes that call returns -EINTR ("write error: Interrupted system
+        // call") and aplay exits 1 on its own within a few tens of ms. The
+        // previous 300 ms wait expired too early on loaded machines and we
+        // escalated to SIGKILL while the child was already unwinding ALSA —
+        // leaving the PCM device busy for the next spawn.
         proc_->terminate();
-        if (!proc_->waitForFinished(300)) proc_->kill();
+        if (!proc_->waitForFinished(2000)) proc_->kill();
     }
 }
 

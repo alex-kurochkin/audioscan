@@ -300,10 +300,17 @@ void AudioPlayer::pumpAudio() {
         emit finished();
         return;
     }
-    if (written < pumpBuf_.size())
+    // Partial/zero writes mean the child's pipe is momentarily full (it is
+    // catching up with the ALSA device). Keep the remaining bytes buffered —
+    // bounded, because we only ever feed ~one tick per call — and retry them
+    // on the next pump tick instead of losing audio.
+    if (written < pumpBuf_.size()) {
+        if (pumpBuf_.size() - written > pumpBytesPerTick_ * 16)
+            pumpBuf_.remove(0, int(pumpBuf_.size() - pumpBytesPerTick_ * 16));
         pumpBuf_.remove(0, int(written));
-    else
+    } else {
         pumpBuf_.clear();
+    }
 }
 
 qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
