@@ -16,7 +16,7 @@ add_executable(audioscout
     src/AudioView.cpp
     src/AudioFile.cpp
     src/AudioPlayer.cpp
-    src/FileDialogModel.cpp
+    src/FileTableModel.cpp
     src/PreviewWorker.cpp
     src/Renderer.cpp
     src/Settings.cpp

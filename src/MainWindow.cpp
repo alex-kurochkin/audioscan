@@ -38,34 +38,18 @@
 #include <algorithm>
 #include <cmath>
 
-// ---------------- debug logging (playback troubleshooting) ----------------
-// Writes to ~/.config/AudioScout/audioscout_debug.log so the log is found
-// regardless of the directory the app was launched from.
-static QFile     g_dbgFile;
-static QTextStream g_dbg(&g_dbgFile);
-static bool      g_dbgOn = false;
-
-static void dbgOpenIfNeeded() {
-    if (g_dbgOn) return;
-    const QDir cfgDir(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation));
-    if (!cfgDir.exists()) cfgDir.mkpath(QStringLiteral("."));
-    g_dbgFile.setFileName(cfgDir.filePath(QStringLiteral("audioscout_debug.log")));
-    if (g_dbgFile.open(QIODevice::Append | QIODevice::Text)) {
-        g_dbg.setDevice(&g_dbgFile);
-        g_dbgOn = true;
-        g_dbg << "\n===== session start " << QDateTime::currentDateTime().toString(Qt::ISODate)
-              << " pid " << QCoreApplication::applicationPid() << " =====\n";
-        g_dbg.flush();
-    }
+// ---------------- debug logging (opt-in, off by default) ----------------
+// Diagnostics stay silent in normal use. Set AUDIOSCOUT_DEBUG=1 in the
+// environment to route the same messages through qDebug() on stderr only —
+// no log file is ever created or appended to.
+static inline bool dbgEnabled() {
+    static const bool on = qEnvironmentVariableIsSet("AUDIOSCOUT_DEBUG");
+    return on;
 }
 
 #define DBG(msg) do { \
-    dbgOpenIfNeeded(); \
-    qWarning().noquote() << "[audioscout]" << (msg); \
-    if (g_dbgOn) { \
-        g_dbg << QDateTime::currentDateTime().toString("HH:mm:ss.zzz") << "  " << (msg) << "\n"; \
-        g_dbg.flush(); \
-    } \
+    if (dbgEnabled()) \
+        qDebug().noquote() << "[audioscout]" << (msg); \
 } while (0)
 
 // Fallback sinks: when Qt Multimedia has no usable audio output device
@@ -232,15 +216,47 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     applyHotkeys();
     connect(&Settings::instance(), &Settings::changed, this, &MainWindow::applyHotkeys);
 
-    // restore last session state
-    QString dir, file; double pos;
+    // restore last session state (spec 10.2): directory is applied right away,
+    // the selected file and playhead position are applied once the scan of
+    // that directory has filled the table (see restorePendingSession()).
+    QString dir, file; double pos = 0.0;
     Database::instance().getSessionState(dir, file, pos);
     if (!dir.isEmpty() && QDir(dir).exists()) {
         tree_->setCurrentIndex(fsModel_->index(dir));
+        if (!file.isEmpty() && QFileInfo(file).exists() &&
+            QFileInfo(file).absolutePath() == QDir(dir).absolutePath()) {
+            pendingSessionFile_ = file;
+            pendingSessionPosSec_ = pos;
+        }
         onDirSelected(dir);
     } else {
         onDirSelected(QDir::homePath());
         tree_->setCurrentIndex(fsModel_->index(QDir::homePath()));
+    }
+}
+
+// Apply the pending file selection/position after a directory scan finished.
+void MainWindow::restorePendingSession() {
+    if (pendingSessionFile_.isEmpty()) return;
+    const int row = model_->rows().indexOf(
+        [this](const FileTableModel::Row &r) { return r.path == pendingSessionFile_; });
+    if (row < 0 || model_->rows()[row].broken) {   // file gone or broken: drop it
+        pendingSessionFile_.clear();
+        return;
+    }
+    const QString file = pendingSessionFile_;
+    const double posSec = pendingSessionPosSec_;
+    pendingSessionFile_.clear();                   // consume before loading
+    table_->selectRow(row);
+    table_->scrollTo(model_->index(row, 0));
+    loadCurrentFile();
+    if (audio_.valid && audio_.sampleRate > 0 && posSec > 0.0) {
+        const qint64 frame = std::clamp<qint64>(
+            qint64(posSec * audio_.sampleRate), 0, audio_.totalFrames);
+        seekingPlayback_ = true;         // programmatic move: no re-seek echo
+        view_->setPlayheadFrame(frame);
+        seekingPlayback_ = false;
+        lastPlayStartFrame_ = frame;     // Play resumes where the session left off
     }
 }
 
@@ -833,6 +849,9 @@ void MainWindow::onScanFinished(DirScanResult res) {
     for (int i = 0; i < n; ++i)
         if (!res.rows[i].broken)
             requestPreview(i);
+    // Session restore (spec 10.2): rows exist only now, so apply the pending
+    // file selection/position right after the scan of the restored directory.
+    restorePendingSession();
 }
 
 // Sort the model by a *model* column id and keep the header indicator,
@@ -1447,6 +1466,10 @@ void MainWindow::prevFile() {
         table_->selectRow(row - 1);
         table_->scrollTo(model_->index(row - 1, 0));
         loadCurrentFile();   // prev/next load the file immediately
+    } else if (row == 0 && audio_.valid) {
+        // Already at the first file: rewind to the start so repeated Prev
+        // behaves predictably instead of silently doing nothing.
+        view_->setPlayheadFrame(0);
     }
 }
 
@@ -1507,15 +1530,21 @@ void MainWindow::applyEditToRange(std::function<void()> op, const QString &type,
         return;
     }
     op();
+    // Save FIRST: only if the file was actually written do we record the undo
+    // entry. Otherwise a failed save would leave history/buffer in conflict
+    // with the disk (undo would restore samples that were never persisted).
+    if (!AudioFile::save(currentPath_, audio_, &err)) {
+        QFile::remove(rec.samplesFile);   // drop the orphaned sample dump
+        QMessageBox::warning(this, tr("Save failed"), err);
+        return;
+    }
     undoStack_.push(rec);
     undoStack_.enforceLimits(Settings::instance().undoDepth(),
                              Settings::instance().undoDiskLimitBytes());
-    if (!AudioFile::save(currentPath_, audio_, &err)) {
-        QMessageBox::warning(this, tr("Save failed"), err);
-    } else {
-        persistMarkers();
-        // file changed: invalidate its preview cache entry and re-request preview
-        Database::instance().invalidatePreviewsForDir(currentDir_);
+    persistMarkers();
+    // file changed: invalidate its preview cache entry and re-request preview
+    Database::instance().invalidatePreviewsForDir(currentDir_);
+    {
         auto rows = model_->rows();
         int row = currentRow();
         if (row >= 0 && row < rows.size()) {

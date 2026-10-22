@@ -15,7 +15,7 @@
 #include <functional>
 class QProcess;
 #include "AudioFile.h"
-#include "FileDialogModel.h"
+#include "FileTableModel.h"
 #include "AudioView.h"
 #include "AudioPlayer.h"
 #include "UndoStack.h"
@@ -77,6 +77,7 @@ private:
                           const QVector<UndoRecord::MarkerDelta> &deltas = {});
     void rebuildColumnMenu();
     int currentRow() const;      // sorted/view row -> source row mapping handled internally
+    void restorePendingSession(); // select+load last file & seek after a scan (spec 10.2)
 
     // UI
     QFileSystemModel *fsModel_ = nullptr;
@@ -121,6 +122,10 @@ private:
     bool fbPaused_ = false;             // paused fallback session kept for resume
     bool seekingPlayback_ = false;      // re-entrancy guard: setPlayheadFrame →
                                         // cursorMoved → seekPlaybackTo must not loop
+    // Session restore (spec 10.2): last file/position are applied after the
+    // directory scan completes, since rows only exist then.
+    QString pendingSessionFile_;
+    double  pendingSessionPosSec_ = 0.0;
     qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
     QElapsedTimer fbClock_;             // timing for fbElapsedMs_
     qint64 fbFromFrame_ = 0;            // frame playback started from (this proc)

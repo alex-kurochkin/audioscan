@@ -1,4 +1,4 @@
-#include "FileDialogModel.h"
+#include "FileTableModel.h"
 #include <QLocale>
 
 static const char *kColumnTitles[] = {
