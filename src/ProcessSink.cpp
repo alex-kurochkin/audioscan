@@ -50,11 +50,25 @@ void ProcessSink::reapChild(qint64 waitMs) {
     if (proc_->state() != QProcess::NotRunning) {
         proc_->closeWriteChannel();
         if (!proc_->waitForFinished(int(waitMs))) {
+            // Escalation path only: the child ignored EOF. SIGTERM first —
+            // it may surface as aplay's "write error: Interrupted system
+            // call" (exitCode=1), which shutdown()/flushPipe() treat as a
+            // benign unwind and do not log.
             proc_->terminate();
             if (!proc_->waitForFinished(1000)) proc_->kill();
             proc_->waitForFinished(1000);
         }
     }
+    // The child is guaranteed NotRunning at this point. Destroying the
+    // QProcess while its process still lives makes Qt print
+    //   "QProcess: Destroyed while process (...) is still running."
+    // straight to stderr as an INFO line on every sink restart (seek, stop,
+    // track change) — previously spamming the user's logs and leaving
+    // orphaned aplay instances fighting for the ALSA device. Reaping above
+    // prevents that; delete here finalises the teardown deterministically.
+    delete proc_;
+    proc_ = nullptr;
+    started_ = false;
 }
 
 void ProcessSink::restartWithArgs(const QStringList &newArgs) {
@@ -84,6 +98,11 @@ void ProcessSink::flushPipe() {
     // still queued in ALSA's own ring inside aplay are short (~period size)
     // and unavoidable without killing the process.
     if (!proc_) return;
+    flushedRecently_ = true;             // next spawn is "warm": skip stderr wait
+    DBG(QStringLiteral("AudioPlayer: flushing sink '%1' pipe (%2 bytes queued)"
+                       " — stale audio dropped")
+            .arg(program_)
+            .arg(proc_->bytesToWrite()));
     if (proc_->state() == QProcess::Running) {
         proc_->closeWriteChannel();     // EOF: aplay drains and exits cleanly
         if (!proc_->waitForFinished(500))
