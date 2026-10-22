@@ -19,10 +19,11 @@ PlayerController::PlayerController(AudioPlayer *player,
     : QObject(parent), player_(player), fb_(fb), ui_(ui) {}
 
 bool PlayerController::isRunning() const {
-    return player_->isPlaying() || player_->isPaused() || fb_->isActive();
+    return player_->isPlaying() || player_->isPaused() || fallbackActive();
 }
 
 bool PlayerController::startFallback(qint64 startFrame, qint64 endFrame, bool loop) {
+    if (!fb_) return false;
     // Programmatic session: the cursor moves inside must never be read as a
     // user click-to-seek.
     const bool ok = fb_->start(startFrame, endFrame, loop);
@@ -30,8 +31,8 @@ bool PlayerController::startFallback(qint64 startFrame, qint64 endFrame, bool lo
     return ok;
 }
 
-void PlayerController::stopFallback() { fb_->stop(); }
-void PlayerController::resetFallbackState() { fb_->resetState(); }
+void PlayerController::stopFallback() { if (fb_) fb_->stop(); }
+void PlayerController::resetFallbackState() { if (fb_) fb_->resetState(); }
 
 void PlayerController::playPause() {
     playPauseInner();
@@ -54,7 +55,7 @@ void PlayerController::playPauseInner() {
         playBtn_->setText(QObject::tr("Pause"));
         return;
     }
-    if (fb_->isActive()) {               // external fallback is running: pause it
+    if (fallbackActive()) {              // external fallback is running: pause it
         qint64 cur = ui_->playhead();
         fb_->stop();                     // keeps start/end/loop, resets wasPlaying_
         if (cur < fb_->startFrame() || cur >= fb_->endFrame())
@@ -65,7 +66,7 @@ void PlayerController::playPauseInner() {
         return;
     }
     // Paused ffmpeg fallback: resume from the playhead position.
-    if (fb_->isPausedSession() &&
+    if (fb_ && fb_->isPausedSession() &&
         (fb_->startFrame() > 0 || fb_->endFrame() > 0)) {
         qint64 cur = ui_->playhead();
         if (cur < fb_->startFrame() || cur >= fb_->endFrame())
@@ -113,7 +114,7 @@ void PlayerController::playPauseInner() {
             lastPlayStartFrame_ = start;
             playBtn_->setText(QObject::tr("Pause"));
             QTimer::singleShot(250, this, [this, start, end, loop] {
-                if (player_->isPlaying() || fb_->isActive()) return;
+                if (player_->isPlaying() || fallbackActive()) return;
                 DBG("Qt audio output failed instantly (resume), switching to ffmpeg fallback");
                 if (startFallback(start, end, loop)) {
                     lastPlayStartFrame_ = start;
@@ -152,7 +153,7 @@ void PlayerController::playPauseInner() {
         playBtn_->setText(QObject::tr("Pause"));
         QTimer::singleShot(250, this, [this, start, end, loop] {
             // Still running normally — nothing to do.
-            if (player_->isPlaying() || fb_->isActive()) return;
+            if (player_->isPlaying() || fallbackActive()) return;
             DBG("Qt audio output failed instantly, switching to ffmpeg fallback");
             if (!startFallback(start, end, loop))
                 ui_->showStatus(QObject::tr(kNoOutputMsg), 5000);
@@ -174,11 +175,11 @@ void PlayerController::stopPlayback() {
     const qint64 qtResume = player_->isPlaying() || player_->isPaused()
                                 ? player_->startFrame() : -1;
     // ffmpeg fallback: same rule — return to the session's start point.
-    const bool fbActive = fb_->isActive() && fb_->wasPlaying();
+    const bool fbActive = fallbackActive() && fb_->wasPlaying();
     const qint64 fbResume = fbActive ? fb_->startFrame() : -1;
 
     player_->stop();
-    fb_->resetState();
+    resetFallbackState();
     playBtn_->setText(QObject::tr("Play"));
     if (qtResume >= 0)
         ui_->setPlayhead(qtResume, true);
@@ -210,7 +211,7 @@ void PlayerController::seekPlaybackTo(qint64 frame) {
     // *start* to the clicked frame; the end follows the selection rule —
     // with a live selection playback still stops at the selection boundary,
     // without one it runs to the end of the file.
-    if (fb_->isActive() || fb_->startFrame() > 0 || fb_->endFrame() > 0) {
+    if (fb_ && (fb_->isActive() || fb_->startFrame() > 0 || fb_->endFrame() > 0)) {
         const qint64 prevStart = fb_->startFrame(), prevEnd = fb_->endFrame();
         const bool prevLoop = fb_->looping();
         const bool wasPausedSession = !fb_->isActive();   // kept for resume
@@ -267,7 +268,7 @@ void PlayerController::onLoopToggled(bool on) {
         ui_->updatePlayButton();   // keep the Loop highlight in sync right now
         return;                    // Qt sink loops internally from here on
     }
-    if (fb_->isActive()) {
+    if (fallbackActive()) {
         // ffmpeg fallback is running: restart it over the same range with
         // the new loop flag, resuming from the current playhead position.
         qint64 cur = ui_->playhead();
@@ -288,7 +289,7 @@ void PlayerController::onLoopToggled(bool on) {
 // process with its own gain (read only at startup), so restart it at the
 // current position with the new value when it is the active output path.
 void PlayerController::onVolumeChanged() {
-    if (fb_->isActive() && fb_->wasPlaying()) {
+    if (fallbackActive() && fb_->wasPlaying()) {
         if (fb_->restartWithVolume()) {
             playBtn_->setText(QObject::tr("Pause"));
         } else {

@@ -152,7 +152,7 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     player_.stop();
-    fb_->stop();
+    if (fb_) fb_->stop();   // early quit: controllers may not exist yet
     // Persist the final header order (drag-reorder done right before closing
     // is saved on every sectionMoved, but this guarantees the last state).
     cols_->saveColumnLayout();
@@ -452,8 +452,13 @@ void MainWindow::buildUi() {
     // The ffmpeg fallback talks to the UI through plain function providers so
     // it never needs to know about widgets; PlayerController owns the
     // play/pause/stop/seek/loop decisions and reports back via PlayerUi (this).
+    pc_ = new PlayerController(&player_, nullptr, this, this);
     fb_ = new FfmpegFallbackController(this);
-    pc_ = new PlayerController(&player_, fb_, this, this);
+    pc_->setFallback(fb_);
+    // The controller needs the widget context to make play/pause/loop
+    // decisions (selection, cursor, button labels). Without this every
+    // entry point bails out silently — "Play does nothing".
+    pc_->setContext(&audio_, view_, loopBtn_, playBtn_);
     fb_->setProviders(
         [this]() -> const AudioData * { return &audio_; },
         [this]() -> qint64 { return view_->playheadFrame(); },
@@ -767,9 +772,9 @@ void MainWindow::onRowDoubleClicked() {
     int row = currentRow();
     if (row >= 0 && row < model_->rows().size()) {
         const QString &newPath = model_->rows()[row].path;
-        if (player_.isPlaying() || fb_->isActive() || newPath != currentPath_) {
+        if (player_.isPlaying() || pc_->fallbackActive() || newPath != currentPath_) {
             player_.stop();
-            fb_->stop();
+            pc_->stopFallback();
             playBtn_->setText(tr("Play"));
         }
     }
@@ -881,9 +886,9 @@ void MainWindow::seekPlaybackTo(qint64 frame) {
 void MainWindow::prevFile() {
     int row = currentRow();
     if (row > 0) {
-        if (player_.isPlaying() || fb_->isActive()) {
+        if (player_.isPlaying() || pc_->fallbackActive()) {
             player_.stop();
-            fb_->stop();
+            pc_->stopFallback();
             playBtn_->setText(tr("Play"));
         }
         table_->selectRow(row - 1);
@@ -899,9 +904,9 @@ void MainWindow::prevFile() {
 void MainWindow::nextFile() {
     int row = currentRow();
     if (row >= 0 && row + 1 < model_->rows().size()) {
-        if (player_.isPlaying() || fb_->isActive()) {
+        if (player_.isPlaying() || pc_->fallbackActive()) {
             player_.stop();
-            fb_->stop();
+            pc_->stopFallback();
             playBtn_->setText(tr("Play"));
         }
         table_->selectRow(row + 1);

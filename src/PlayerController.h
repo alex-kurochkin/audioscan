@@ -34,8 +34,14 @@ class QLabel;
 class PlayerController : public QObject {
     Q_OBJECT
 public:
+    // `fb` may be null at construction time (e.g. when the fallback is built
+    // later in buildUi()); every use below is null-checked, so playback and
+    // stop still work before it is attached.
     PlayerController(AudioPlayer *player, FfmpegFallbackController *fb,
                      PlayerUi *ui, QObject *parent = nullptr);
+
+    void setFallback(FfmpegFallbackController *fb) { fb_ = fb; }
+    FfmpegFallbackController *fallback() const { return fb_; }
 
     void setContext(AudioData *audio, AudioView *view, QPushButton *loopBtn,
                     QPushButton *playBtn) {
@@ -58,14 +64,14 @@ public:
     void onFallbackFinished(bool error);
 
     // ---- session bookkeeping exposed to MainWindow ----
-    bool fallbackActive() const { return fb_->isActive(); }
-    bool fallbackWasPlaying() const { return fb_->wasPlaying(); }
-    bool fallbackPausedSession() const { return fb_->isPausedSession(); }
-    void setFallbackPausedSession(bool p) { fb_->setPausedSession(p); }
-    qint64 fallbackStartFrame() const { return fb_->startFrame(); }
-    qint64 fallbackEndFrame() const { return fb_->endFrame(); }
-    bool fallbackLooping() const { return fb_->looping(); }
-    void setFallbackRange(qint64 s, qint64 e, bool loop) { fb_->setRange(s, e, loop); }
+    bool fallbackActive() const { return fb_ && fb_->isActive(); }
+    bool fallbackWasPlaying() const { return fb_ && fb_->wasPlaying(); }
+    bool fallbackPausedSession() const { return fb_ && fb_->isPausedSession(); }
+    void setFallbackPausedSession(bool p) { if (fb_) fb_->setPausedSession(p); }
+    qint64 fallbackStartFrame() const { return fb_ ? fb_->startFrame() : -1; }
+    qint64 fallbackEndFrame() const { return fb_ ? fb_->endFrame() : -1; }
+    bool fallbackLooping() const { return fb_ && fb_->looping(); }
+    void setFallbackRange(qint64 s, qint64 e, bool loop) { if (fb_) fb_->setRange(s, e, loop); }
     // Start the ffmpeg fallback directly (used by the deferred "Qt sink died
     // instantly" checks); returns true when the process is running.
     bool startFallback(qint64 startFrame, qint64 endFrame, bool loop);
