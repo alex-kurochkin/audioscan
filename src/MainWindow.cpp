@@ -31,150 +31,15 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryFile>
-#include <QFutureWatcher>
-#include <QtConcurrent/QtConcurrentRun>
-#include <QThreadPool>
+#include "DirScanner.h"
+#include "FfmpegFallbackController.h"
+#include "PlayerController.h"
+#include "ProcessSink.h"
+
 #include <QVBoxLayout>
 #include <QMediaDevices>
-#include <QProcess>
 #include <QFileInfo>
-#include <QStandardPaths>
-#include <QCoreApplication>
 #include <algorithm>
-#include <cmath>
-
-// ---------------- debug logging (opt-in, off by default) ----------------
-// Diagnostics stay silent in normal use. Set AUDIOSCOUT_DEBUG=1 in the
-// environment to route the same messages through qDebug() on stderr only —
-// no log file is ever created or appended to.
-static inline bool dbgEnabled() {
-    static const bool on = qEnvironmentVariableIsSet("AUDIOSCOUT_DEBUG");
-    return on;
-}
-
-#define DBG(msg) do { \
-    if (dbgEnabled()) \
-        qDebug().noquote() << "[audioscout]" << (msg); \
-} while (0)
-
-// Fallback sinks: when Qt Multimedia has no usable audio output device
-// (missing PulseAudio/PipeWire plugins), pipe raw PCM to an external player
-// via a QProcess-backed QIODevice. QAudioSink accepts any QIODevice that
-// supports write, so this keeps playback working even in bare environments.
-class ProcessSink : public QIODevice {
-public:
-    explicit ProcessSink(const QString &program, const QStringList &args,
-                         QObject *parent = nullptr)
-        : QIODevice(parent), program_(program), args_(args) {}
-    ~ProcessSink() override { shutdown(); }
-
-    // Restart the child process with an updated argument list while keeping
-    // the same object identity (AudioPlayer deletes this device only when it
-    // replaces it). Used for live volume changes on "aplay", whose -volume is
-    // fixed at spawn time. The next writeData() respawns lazily with newArgs.
-    void restartWithArgs(const QStringList &newArgs) {
-        args_ = newArgs;
-        shutdown();
-    }
-
-protected:
-    qint64 readData(char *, qint64) override { return 0; }
-    qint64 writeData(const char *data, qint64 len) override {
-        if (!ensureStarted()) return -1;
-        proc_->write(data, len);
-        proc_->waitForBytesWritten(500);
-        return len;
-    }
-    void close() override { shutdown(); }
-
-private:
-    bool ensureStarted() {
-        if (proc_) {
-            if (proc_->state() == QProcess::NotRunning &&
-                proc_->exitStatus() != QProcess::NormalExit)
-                return false;   // crashed earlier — don't retry
-            return proc_->state() == QProcess::Running;
-        }
-        proc_ = new QProcess(this);
-        proc_->setProgram(program_);
-        proc_->setArguments(args_);
-        // ForwardedErrorChannel would spam the terminal with child chatter
-        // (e.g. libmpg123 warnings on broken MP3s). Discard stderr; failures
-        // are still surfaced via "failed to start" above and exit-code checks.
-        proc_->setProcessChannelMode(QProcess::MergedChannels);
-        proc_->setStandardOutputFile(QStringLiteral("/dev/null"));
-        proc_->start();
-        if (!proc_->waitForStarted(3000)) {
-            qWarning().noquote()
-                << QStringLiteral("AudioPlayer: failed to start '%1'").arg(program_);
-            delete proc_;
-            proc_ = nullptr;
-            return false;
-        }
-        return true;
-    }
-    void shutdown() {
-        if (!proc_) return;
-        proc_->closeWriteChannel();
-        proc_->waitForFinished(300);
-        if (proc_->state() == QProcess::Running) {
-            proc_->terminate();
-            if (!proc_->waitForFinished(300)) proc_->kill();
-        }
-    }
-    QString program_;
-    QStringList args_;
-    QProcess *proc_ = nullptr;
-};
-
-static QStringList aplayArgsFor(const QAudioFormat &fmt, double volume) {
-    auto tag = [](QAudioFormat::SampleFormat sf) -> QString {
-        switch (sf) {
-        case QAudioFormat::Int16: return QStringLiteral("S16_LE");
-        case QAudioFormat::Int32: return QStringLiteral("S32_LE");
-        case QAudioFormat::Float: return QStringLiteral("F32_LE");
-        case QAudioFormat::UInt8: return QStringLiteral("U8");
-        default:                  return QStringLiteral("S16_LE");
-        }
-    };
-    QStringList args;
-    args << "-q" << "-t" << "raw"
-         << "-c" << QString::number(fmt.channelCount())
-         << "-r" << QString::number(fmt.sampleRate())
-         << "-f" << tag(fmt.sampleFormat());
-    // aplay applies its own hardware-independent gain; the in-process float
-    // path multiplies by volume_ directly, so do the same here. 0 dB = full
-    // scale; anything above 0 dB clips, so clamp to it.
-    const double db = volume >= 0.999 ? 0.0
-                     : 20.0 * std::log10(std::max(volume, 0.0005));
-    args << "-v" << QString::number(db, 'f', 1);
-    return args;
-}
-
-static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
-    // Spawn with the player's current volume (setVolumeApplier wires this up);
-    // live slider changes respawn the process via AudioPlayer::
-    // restartOutputKeepingPosition().
-    auto *ap = qobject_cast<AudioPlayer *>(parent);
-    const double v = ap ? ap->volume() : 1.0;
-    auto *s = new ProcessSink(QStringLiteral("aplay"), aplayArgsFor(fmt, v), parent);
-    s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
-    return s;
-}
-
-static QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
-    QStringList args;
-    // NOTE: ffplay has no -autoexit option; it exits on EOF of stdin input.
-    args << "-nodisp" << "-loglevel" << "quiet"
-         << "-f" << "f32le"
-         << "-ar" << QString::number(fmt.sampleRate())
-         << "-ac" << QString::number(fmt.channelCount())
-         << "-i" << "-";
-    auto *s = new ProcessSink(QStringLiteral("ffplay"), args, parent);
-    s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
-    return s;
-}
-
 
 // Directory tree model: only directories are listed (spec 2.3), and their
 // names are always visible even before the async filesystem watcher has
@@ -222,19 +87,6 @@ public:
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     buildUi();
-    // Debounced writer for user-resized column widths (SQLite session table).
-    colWidthSaveTimer_.setSingleShot(true);
-    connect(&colWidthSaveTimer_, &QTimer::timeout, this, [this] {
-        saveColumnWidths();
-        // Keep the in-memory copy in sync so a later re-scan restores them.
-        if (table_ && model_) {
-            auto *hdr = table_->horizontalHeader();
-            const auto &visCols = model_->visibleColumns();
-            for (int log = 0; log < visCols.size(); ++log)
-                if (!hdr->isSectionHidden(log))
-                    colWidths_.insert(visCols[log], table_->columnWidth(log));
-        }
-    });
     applyHotkeys();
     connect(&Settings::instance(), &Settings::changed, this, &MainWindow::applyHotkeys);
 
@@ -288,10 +140,8 @@ void MainWindow::restorePendingSession() {
     if (audio_.valid && audio_.sampleRate > 0 && posSec > 0.0) {
         const qint64 frame = std::clamp<qint64>(
             qint64(posSec * audio_.sampleRate), 0, audio_.totalFrames);
-        seekingPlayback_ = true;         // programmatic move: no re-seek echo
-        view_->setPlayheadFrame(frame);
-        seekingPlayback_ = false;
-        lastPlayStartFrame_ = frame;     // Play resumes where the session left off
+        setPlayhead(frame, true);              // Play resumes where the session left off
+        pc_->setLastPlayStartFrame(frame);
     }
 }
 
@@ -299,11 +149,12 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     player_.stop();
+    fb_->stop();
     // Persist the final header order (drag-reorder done right before closing
     // is saved on every sectionMoved, but this guarantees the last state).
-    saveColumnLayout();
-    colWidthSaveTimer_.stop();      // flush any pending width save below
-    saveColumnWidths();
+    cols_->saveColumnLayout();
+    cols_->widthSaveTimer()->stop();     // flush any pending width save below
+    cols_->saveColumnWidths();
     // Only persist the session we actually own: if startup restored a stale
     // lastFile that was never loaded (user didn't touch anything), keep it
     // untouched instead of clobbering good state with an empty one.
@@ -322,6 +173,11 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("AudioScout"));
     resize(1280, 860);
+
+    // Background directory scanner (extracted from this class): scans never
+    // block the UI thread; results arrive through finished().
+    scanner_ = new DirScanner(this);
+    connect(scanner_, &DirScanner::finished, this, &MainWindow::onScanFinished);
 
     fsModel_ = new DirTreeModel(this);
     fsModel_->setRootPath(QDir::rootPath());
@@ -349,7 +205,6 @@ void MainWindow::buildUi() {
     columnsBtn_ = new QToolButton(tb);
     columnsBtn_->setText(tr("Columns"));
     columnsBtn_->setToolTip(tr("Choose which columns to display"));
-    connect(columnsBtn_, &QToolButton::clicked, this, &MainWindow::openColumnsDialog);
     tb->addWidget(columnsBtn_);
 
     // Single toggle button instead of a dropdown: shows the mode it will switch TO.
@@ -451,6 +306,25 @@ void MainWindow::buildUi() {
     // hidden. Track header clicks ourselves and translate them to model cols.
     table_->setSortingEnabled(false);
     table_->horizontalHeader()->setSortIndicatorShown(true);
+
+    // Column layout controller: owns visibility/order/width persistence and
+    // the "Columns" dialog. It asks for the selected file path so a sort can
+    // keep the selection in sync.
+    cols_ = new ColumnLayoutController(table_, model_, this);
+    cols_->setSelectedPathProvider([this] {
+        const int row = currentRow();
+        return (row >= 0 && row < model_->rows().size()) ? model_->rows()[row].path
+                                                         : QString();
+    });
+    connect(columnsBtn_, &QToolButton::clicked, this, [this] {
+        cols_->openDialog(this);
+    });
+    connect(cols_, &ColumnLayoutController::columnsChanged, this, [this] {
+        // Visible set changed: re-run the lazy preview prefetch for the
+        // new layout (the generation counter drops stale in-flight results).
+        refreshPreviewsForDir();
+    });
+
     connect(table_->horizontalHeader(), &QHeaderView::sectionClicked,
             this, [this](int visual) {
         const int logical = table_->horizontalHeader()->logicalIndex(visual);
@@ -459,32 +333,30 @@ void MainWindow::buildUi() {
         if (modelCol == FileTableModel::ColPreview ||
             modelCol == FileTableModel::ColComment) {
             // Sorting forbidden per spec 2.4 — keep the current indicator.
-            updateSortIndicator();
+            cols_->updateSortIndicator();
             return;
         }
         Qt::SortOrder order = Qt::AscendingOrder;
         if (modelCol == model_->sortColumn())
             order = (model_->sortOrder() == Qt::AscendingOrder)
                         ? Qt::DescendingOrder : Qt::AscendingOrder;
-        sortByModelColumn(modelCol, order);
+        cols_->sortByModelColumn(modelCol, order);
     });
-    // After a header drag-reorder or any model reset/sort, re-apply sensible
-    // widths to the visual sections (model columns may have moved around).
     // After a header drag-reorder, persist the new visual order of *all*
     // columns (visible + hidden) so it survives restarts.
     connect(table_->horizontalHeader(), &QHeaderView::sectionMoved,
-            this, [this] { saveColumnLayout(); applyTableColumnWidths(); updateSortIndicator(); });
-    // Persist user-resized column widths (debounced) — restored on the next
-    // start from the SQLite session table.
+            this, [this] { cols_->saveColumnLayout(); cols_->applyTableColumnWidths();
+                           cols_->updateSortIndicator(); });
+    // Persist user-resized column widths (debounced) into config.json.
     connect(table_->horizontalHeader(), &QHeaderView::sectionResized, this,
             [this](int /*logical*/, int /*oldSize*/, int newSize) {
                 if (newSize <= 0 || !model_) return;   // hide/reset noise
                 const auto &visCols = model_->visibleColumns();
                 if (visCols.isEmpty()) return;         // no rows yet: nothing to store
-                colWidthSaveTimer_.start(300);
+                cols_->widthSaveTimer()->start(300);
             });
     connect(model_, &QAbstractItemModel::modelReset,
-            this, [this] { QTimer::singleShot(0, this, [this] { applyTableColumnWidths(); }); });
+            this, [this] { QTimer::singleShot(0, this, [this] { cols_->applyTableColumnWidths(); }); });
     connect(model_, &FileTableModel::previewRequested, this, &MainWindow::requestPreview);
 
     // ---- action panel (active file) — inside the resizable lower pane ----
@@ -581,61 +453,29 @@ void MainWindow::buildUi() {
 
     connect(prevBtn, &QPushButton::clicked, this, &MainWindow::prevFile);
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
-    connect(playBtn_, &QPushButton::clicked, this, &MainWindow::playPause);
-    connect(stopBtn, &QPushButton::clicked, this, &MainWindow::stopPlayback);
+
+    // ---- playback controllers (extracted from this class) ----
+    // The ffmpeg fallback talks to the UI through plain function providers so
+    // it never needs to know about widgets; PlayerController owns the
+    // play/pause/stop/seek/loop decisions and reports back via PlayerUi (this).
+    fb_ = new FfmpegFallbackController(this);
+    pc_ = new PlayerController(&player_, fb_, this, this);
+    fb_->setProviders(
+        [this]() -> const AudioData * { return &audio_; },
+        [this]() -> qint64 { return view_->playheadFrame(); },
+        [this](qint64 f) { setPlayhead(f, true); },
+        [this]() -> bool { return loopBtn_->isChecked(); });
+    fb_->setOnFinished([this](bool error) { pc_->onFallbackFinished(error); });
+
+    connect(playBtn_, &QPushButton::clicked, this, [this] { pc_->playPause(); });
+    connect(stopBtn, &QPushButton::clicked, this, [this] { pc_->stopPlayback(); });
     // Loop toggling: works while stopped AND while playing. Loop never sets up
     // its own repeat start point: the looped range is exactly what Play would
     // use — the current selection if there is one, otherwise the whole file.
     // While playback is active the range is re-armed immediately so looping
     // takes effect live.
     connect(loopBtn_, &QPushButton::toggled, this, [this](bool on) {
-        if (!audio_.valid) return;
-        const qint64 selStart = view_->selStart();
-        const qint64 selEnd   = view_->selEnd();
-        const bool hasSel     = view_->hasSelection();
-        const qint64 rangeStart = hasSel ? selStart : 0;
-        const qint64 rangeEnd   = hasSel ? selEnd : audio_.totalFrames;
-
-        if (player_.isPlaying() || player_.isPaused()) {
-            // Loop never invents its own repeat start: the repeat range is
-            // exactly what the session plays — selection if any, otherwise
-            // the whole file. Retarget only the loop boundary in place; do
-            // NOT restart the output (that used to drop a chunk of already
-            // buffered audio and re-open the device — audible glitch) and do
-            // NOT touch the play-start point (Stop must still rewind there).
-            const qint64 cur = view_->playheadFrame();
-            if (player_.setLoopRange(rangeStart, rangeEnd)) {
-                player_.setLooping(on);
-                if (cur < rangeStart || cur >= rangeEnd) {
-                    // Playhead outside the new repeat range: jump it back in.
-                    seekingPlayback_ = true;   // programmatic move: no re-seek
-                    player_.seek(rangeStart);
-                    view_->setPlayheadFrame(player_.currentFrame());
-                    seekingPlayback_ = false;
-                }
-            }
-            updatePlayButton();   // keep the Loop highlight in sync right now
-            return;               // Qt sink loops internally from here on
-        }
-        if (playProc_) {
-            // ffmpeg fallback is running: restart it over the same range with
-            // the new loop flag, resuming from the current playhead position.
-            qint64 cur = view_->playheadFrame();
-            if (cur < rangeStart || cur >= rangeEnd) cur = rangeStart;
-            seekingPlayback_ = true;         // process restart moves the cursor
-            stopFfmpegFallback();
-            wasPlaying_ = true;          // keep the session alive across restart
-            startFfmpegFallback(rangeStart, rangeEnd, on);
-            if (playProc_) {
-                playBtn_->setText(tr("Pause"));
-                view_->setPlayheadFrame(cur);
-            } else {
-                playBtn_->setText(tr("Play"));
-            }
-            seekingPlayback_ = false;
-        }
-        // Stopped: nothing to restart — the next Play picks up the loop flag
-        // and computes the same selection-or-whole-file range itself.
+        pc_->onLoopToggled(on);
     });
     connect(volumeSlider_, &QSlider::valueChanged, this, [this](int v) {
         player_.setVolume(v / 100.0);
@@ -643,7 +483,7 @@ void MainWindow::buildUi() {
         // The ffmpeg direct-playback fallback is a separate process with its
         // own volume: restart it at the current position with the new gain so
         // the slider works in every output path.
-        if (playProc_ && wasPlaying_) restartFfmpegFallbackWithVolume();
+        pc_->onVolumeChanged();
     });
     connect(displayToggleBtn_, &QToolButton::clicked, this, [this] {
         const bool toSpectrogram = view_->mode() != QLatin1String("spectrogram");
@@ -1172,6 +1012,63 @@ void MainWindow::applyTableColumnWidths() {
                 table_->setColumnWidth(logical, w);
         }
     }
+}
+
+// ---------------- UI wiring for the playback engine ----------------
+
+void MainWindow::wirePlayerSignals() {
+    // Audio output strategy: prefer Qt Multimedia's own QAudioSink; if the
+    // default device is null or rejects our format, fall back to piping raw
+    // PCM to "aplay" (ALSA) and then "ffplay" (ffmpeg). The factory returns
+    // an opened write-only QIODevice; AudioPlayer wraps it in a QAudioSink.
+    player_.setSinkFactory([this](const QAudioFormat &fmt) -> QIODevice * {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            qWarning() << "MainWindow: Qt audio output unavailable, trying aplay/ffplay fallback";
+        }
+        if (QFileInfo::exists(QStringLiteral("/usr/bin/aplay")) ||
+            !QStandardPaths::findExecutable(QStringLiteral("aplay")).isEmpty())
+            return makeAplaySink(fmt, &player_);
+        if (!QStandardPaths::findExecutable(QStringLiteral("ffplay")).isEmpty())
+            return makeFfplaySink(fmt, &player_);
+        return nullptr;
+    });
+
+    connect(&player_, &AudioPlayer::positionChanged, this, [this](qint64 f) {
+        setPlayhead(f, true);
+    });
+    connect(&player_, &AudioPlayer::finished, this, [this] {
+        playBtn_->setText(tr("Play"));
+        // Natural end of a non-looped session (e.g. playback reached the end
+        // of a selection): jump the visible cursor back to where the session
+        // started, so it matches what the next Play will resume from — the
+        // same rule Stop follows. With Loop on the range repeats forever, so
+        // finished() only fires on errors — leave the cursor alone then.
+        if (!loopBtn_->isChecked()) {
+            setPlayhead(player_.startFrame(), true);
+            pc_->setLastPlayStartFrame(player_.startFrame());  // keep resume point in sync
+        }
+        updatePlayButton();   // session over: drop any stale Pause/Loop styling
+    });
+    // Safety net: whenever the Qt sink state changes (finish, device error,
+    // external stop), sync the button so it never sticks on "Pause".
+    connect(&player_, &AudioPlayer::positionChanged, this,
+            [this] { updatePlayButton(); });
+
+    // Loop-button highlight must follow *actual* loop activity: re-evaluate
+    // it whenever the player arms/disarms audible looping (start, stop,
+    // finish, toggle) — see updatePlayButton().
+    connect(&player_, &AudioPlayer::loopStateChanged, this,
+            [this](bool) { updatePlayButton(); });
+
+    // Live volume for push-mode outputs (aplay/ffplay pipe): those processes
+    // read their gain only at startup, so respawn them with the new value
+    // while keeping the playback position. Pull mode needs nothing: the PCM
+    // generator multiplies by the atomic volume_ on every chunk.
+    player_.setVolumeApplier([this](double) {
+        player_.restartOutputKeepingPosition();
+    });
 }
 
 void MainWindow::requestPreview(int row) {

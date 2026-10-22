@@ -8,16 +8,11 @@
 #include <QSlider>
 #include <QDoubleSpinBox>
 #include <QFileSystemModel>
-#include <QElapsedTimer>
-#include <QHash>
-#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QLabel>
-#include <QDialog>
-#include <QCheckBox>
 #include <functional>
-class QProcess;
+
 #include "AudioFile.h"
 #include "FileTableModel.h"
 #include "AudioView.h"
@@ -25,16 +20,23 @@ class QProcess;
 #include "UndoStack.h"
 #include "Types.h"
 
+#include "DirScanner.h"               // DirScanResult travels in queued signals
+#include "PlayerController.h"         // MainWindow implements PlayerUi
+#include "ColumnLayoutController.h"
+
 class PreviewWorker;
+class FfmpegFallbackController;
 
-// Result of a background directory scan (used with queued signal delivery).
-struct DirScanResult {
-    QString dir;
-    QVector<FileTableModel::Row> rows;
-};
-Q_DECLARE_METATYPE(DirScanResult)
-
-class MainWindow : public QMainWindow {
+// Main application window: owns the widgets and the document state (audio
+// buffer, markers, undo stack) and delegates all subsystem logic to dedicated
+// controllers:
+//   PlayerController          — play/pause/stop/seek/loop decisions
+//   FfmpegFallbackController  — the external ffmpeg playback process
+//   ColumnLayoutController    — table column visibility/order/widths/dialog
+//   DirScanner                — background directory scans
+//   PreviewWorker             — async waveform/spectrogram thumbnails
+// Everything left in here is UI wiring, file loading, editing and markers.
+class MainWindow : public QMainWindow, public PlayerUi {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
@@ -44,7 +46,7 @@ public:
     // Test hooks (only compiled with -DAUDIOSCOUT_TESTING).
     QTableView *testTable() const { return table_; }
     FileTableModel *testModel() const { return model_; }
-    void openColumnsDialogForTest() { openColumnsDialog(); }
+    void openColumnsDialogForTest() { cols_->openDialog(this); }
 #endif
 
 protected:
@@ -56,9 +58,6 @@ private slots:
     void onSearchClicked();
     void onRowDoubleClicked();
     void loadCurrentFile();
-    void playPause();      // Play/Pause button entry (syncs the label at the end)
-    void playPauseInner(); // raw start/pause/resume logic, no final sync
-    void stopPlayback();
     void updatePlayButton();
     void prevFile();
     void nextFile();
@@ -79,15 +78,14 @@ private slots:
     void applyHotkeys();
 
 private:
+    // ---- PlayerUi: the playback engine talks back through these ----
+    void setPlayhead(qint64 frame, bool programmatic) override;
+    qint64 playhead() const override;
+    void showStatus(const QString &msg, int msec) override;
+    void rangeChanged(qint64 startFrame, qint64 endFrame) override;
+
     void buildUi();
-    void applyTableColumnWidths();   // per-model-column widths after reset/move
-    void sortByModelColumn(int modelCol, Qt::SortOrder order);  // sort + indicator/selection sync
-    void updateSortIndicator();      // keep the header arrow on the right visual section
-    void saveColumnLayout();         // persist column order/visibility to settings
-    void openColumnsDialog();        // "Columns" button -> chooser dialog (Save/Cancel)
-    void applySavedColumnOrder();    // restore visual header order from settings on startup
-    void saveColumnWidths();         // persist per-column widths to config.json
-    void loadColumnWidths();         // read persisted widths from config.json
+    void wirePlayerSignals();     // player/fallback -> UI connections
     void requestPreview(int row);
     void applyPreviewMode(const QString &mode);   // switch previews to one mode atomically
     bool editGuarded();          // checks editable format + write perms
@@ -125,64 +123,22 @@ private:
     QVector<Marker> markers_;
     UndoStack undoStack_;
     AudioPlayer player_;
-    // Direct ffmpeg fallback: when neither Qt Multimedia nor the in-process
-    // pipe sinks can produce sound, we spawn "ffmpeg -re -i tmpfile" so that
-    // playback always works. playProc_ owns the temp file path.
-    QProcess *playProc_ = nullptr;
-    QString playTmpPath_;
-    // The in-process pipe sink currently owned by AudioPlayer (aplay/ffplay).
-    // Kept here so the volume slider can respawn aplay with a new -v value.
-    class ProcessSink *pipeSink_ = nullptr;   // defined in MainWindow.cpp
-    QAudioFormat pipeFmt_;
-    // Current fallback range in frames (for pause/resume and loop restart).
-    qint64 fbStartFrame_ = 0, fbEndFrame_ = 0;
-    // Frame where the last Play session started (Qt path). Stop keeps the
-    // playhead in place; pressing Play again resumes from this point.
-    qint64 lastPlayStartFrame_ = -1;
-    bool fbLooping_ = false;
-    bool wasPlaying_ = false;           // fallback session active (vs. stopped/paused)
-    bool fbPaused_ = false;             // paused fallback session kept for resume
     bool seekingPlayback_ = false;      // re-entrancy guard: setPlayheadFrame →
                                         // cursorMoved → seekPlaybackTo must not loop
     // Session restore (spec 10.2): last file/position are applied after the
     // directory scan completes, since rows only exist then.
     QString pendingSessionFile_;
-    QHash<int, int> colWidths_;   // model column id -> persisted width (config.json)
-    QTimer colWidthSaveTimer_;    // debounce for saveColumnWidths()
-    bool firstWidthLoad_ = true;  // one-time migration of legacy SQLite widths
     double  pendingSessionPosSec_ = 0.0;
-    qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
-    QElapsedTimer fbClock_;             // timing for fbElapsedMs_
-    qint64 fbFromFrame_ = 0;            // frame playback started from (this proc)
-    QTimer *fbPlayheadTimer_ = nullptr; // advances the playhead during fallback
-    void startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop);
-    void stopFfmpegFallback();
-    void resumeFfmpegFallback();
-    // Relaunch the running ffmpeg fallback at the current playhead with the
-    // newly stored volume (the external process reads gain only at startup).
-    void restartFfmpegFallbackWithVolume();
-    // Seek during playback: moves the playhead and continues from the new
-    // position in whichever output path is active (Qt sink, pipe fallback or
-    // external ffmpeg process). No-op when nothing is playing.
-    void seekPlaybackTo(qint64 frame);
+
+    // Controllers extracted from this god-class (see the class comment).
+    DirScanner *scanner_ = nullptr;
+    FfmpegFallbackController *fb_ = nullptr;
+    PlayerController *pc_ = nullptr;
+    ColumnLayoutController *cols_ = nullptr;
+
+    void seekPlaybackTo(qint64 frame);  // forwards to pc_ (click-to-seek handler)
     // Refresh the active-file indicators: the label on the action panel and
     // the window title ("AudioScout - <file name>").
     void updateActiveFileDisplay();
     PreviewWorker *previewWorker_ = nullptr;
-};
-
-// Lightweight column chooser used by the "Columns" toolbar button: a popup
-// dialog with one checkbox per live column (in the persisted full order) and
-// Save/Cancel buttons. Cancel leaves the table untouched; Save applies the
-// new visible set and persists it (header order is kept as-is).
-class ColumnsDialog : public QDialog {
-public:
-    explicit ColumnsDialog(const QStringList &keys, const QStringList &labels,
-                           const QSet<int> &shown, QWidget *parent = nullptr);
-    // Column ids (indices into the label list) checked in the dialog.
-    QStringList selectedKeys() const;
-
-private:
-    QStringList keys_;
-    QVector<QCheckBox *> checks_;
 };
