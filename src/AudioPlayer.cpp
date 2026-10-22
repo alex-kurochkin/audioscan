@@ -379,6 +379,7 @@ void AudioPlayer::stop() {
     playing_ = false;
     paused_ = false;
     emit loopStateChanged(isLoopActive());   // session over: loop is no longer active
-    posFrames_ = startFrames_;   // rewind to the point where Play started
+    // Leave posFrames_ at the current playback position: Stop must NOT jump
+    // back to the start of the file/session (the "W" shortcut goes home).
     emit positionChanged(posFrames_);
 }

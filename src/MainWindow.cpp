@@ -480,21 +480,44 @@ void MainWindow::buildUi() {
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::nextFile);
     connect(playBtn_, &QPushButton::clicked, this, &MainWindow::playPause);
     connect(stopBtn, &QPushButton::clicked, this, &MainWindow::stopPlayback);
-    // Loop toggling: works while stopped AND while playing. When playback is
-    // active the range is re-armed immediately so looping takes effect live.
+    // Loop toggling: works while stopped AND while playing. Loop never sets up
+    // its own repeat start point: the looped range is exactly what Play would
+    // use — the current selection if there is one, otherwise the whole file.
+    // While playback is active the range is re-armed immediately so looping
+    // takes effect live.
     connect(loopBtn_, &QPushButton::toggled, this, [this](bool on) {
+        if (!audio_.valid) return;
+        const qint64 selStart = view_->selStart();
+        const qint64 selEnd   = view_->selEnd();
+        const bool hasSel     = view_->hasSelection();
+        const qint64 rangeStart = hasSel ? selStart : 0;
+        const qint64 rangeEnd   = hasSel ? selEnd : audio_.totalFrames;
+
         if (player_.isPlaying() || player_.isPaused()) {
-            player_.setLooping(on);
-            return;   // Qt sink loops internally, no restart needed
+            // Re-arm the *selection-or-whole-file* range (not whatever range
+            // the last session happened to use), then toggle the loop flag.
+            const qint64 cur = std::clamp(view_->playheadFrame(), rangeStart, rangeEnd - 1);
+            player_.play(rangeStart, rangeEnd, on);
+            player_.seek(cur);
+            return;   // Qt sink loops internally from here on
         }
         if (playProc_) {
             // ffmpeg fallback is running: restart it over the same range with
             // the new loop flag, resuming from the current playhead position.
             qint64 cur = view_->playheadFrame();
-            if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
-            startFfmpegFallback(cur, fbEndFrame_, on);
-            if (playProc_) playBtn_->setText(tr("Pause"));
+            if (cur < rangeStart || cur >= rangeEnd) cur = rangeStart;
+            stopFfmpegFallback();
+            wasPlaying_ = true;          // keep the session alive across restart
+            startFfmpegFallback(rangeStart, rangeEnd, on);
+            if (playProc_) {
+                playBtn_->setText(tr("Pause"));
+                view_->setPlayheadFrame(cur);
+            } else {
+                playBtn_->setText(tr("Play"));
+            }
         }
+        // Stopped: nothing to restart — the next Play picks up the loop flag
+        // and computes the same selection-or-whole-file range itself.
     });
     connect(volumeSlider_, &QSlider::valueChanged, this, [this](int v) {
         player_.setVolume(v / 100.0);
@@ -540,6 +563,10 @@ void MainWindow::buildUi() {
             seekPlaybackTo(f);
             return;
         }
+        // Stopped after a session: moving the cursor defines a new start
+        // point for the next Play (overrides the "resume where it started"
+        // behavior). W / Home jumping to 0 also flows through here.
+        if (lastPlayStartFrame_ >= 0) lastPlayStartFrame_ = f;
         if (audio_.valid)
             Database::instance().setSessionState(currentDir_, currentPath_,
                                                  double(f) / audio_.sampleRate);
@@ -871,6 +898,7 @@ void MainWindow::loadCurrentFile() {
     }
     QString err;
     player_.stop();
+    lastPlayStartFrame_ = -1;   // per-file resume point resets on (re)load
     if (!AudioFile::load(r.path, audio_, &err)) {
         QMessageBox::warning(this, tr("Load failed"),
                              tr("Cannot open %1\n%2").arg(r.name, err));
@@ -936,6 +964,43 @@ void MainWindow::playPause() {
         return;
     }
 
+    // After Stop: resume from where playback last started, not from the
+    // cursor/playhead. The user can jump to a new spot by clicking the
+    // waveform, or press W to go to the beginning of the file.
+    // Loop never invents its own repeat start: when armed, the session range
+    // is re-derived exactly like a fresh Play does — selection if any,
+    // otherwise the whole file.
+    if (lastPlayStartFrame_ >= 0) {
+        const bool loop = loopBtn_->isChecked();
+        qint64 start = lastPlayStartFrame_;
+        qint64 end   = audio_.totalFrames;
+        if (loop && view_->hasSelection()) {
+            start = view_->selStart();
+            end   = view_->selEnd();
+        } else if (loop) {
+            start = 0;
+        }
+        player_.play(start, end, loop);
+        if (player_.isPlaying()) {
+            playBtn_->setText(tr("Pause"));
+            QTimer::singleShot(250, this, [this, start, end, loop] {
+                if (player_.isPlaying() || playProc_) return;
+                DBG("Qt audio output failed instantly (resume), switching to ffmpeg fallback");
+                startFfmpegFallback(start, end, loop);
+                if (!playProc_)
+                    statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
+            });
+            return;
+        }
+        startFfmpegFallback(start, end, loop);
+        if (playProc_) {
+            playBtn_->setText(tr("Pause"));
+            return;
+        }
+        playBtn_->setText(tr("Play"));
+        lastPlayStartFrame_ = -1;   // no working output — fall through to normal start
+    }
+
     qint64 start = view_->cursorFrame();
     qint64 end = audio_.totalFrames;
     if (view_->hasSelection()) {
@@ -954,6 +1019,7 @@ void MainWindow::playPause() {
     DBG(QStringLiteral("playPause: trying Qt sink, start=%1 end=%2 loop=%3 sel=%4")
         .arg(start).arg(end).arg(loop).arg(view_->hasSelection()));
     player_.play(start, end, loop);
+    lastPlayStartFrame_ = start;   // remember where this session began (Stop/Play resume point)
     if (player_.isPlaying()) {
         playBtn_->setText(tr("Pause"));
         QTimer::singleShot(250, this, [this, start, end, loop] {

@@ -112,6 +112,9 @@ private:
     QAudioFormat pipeFmt_;
     // Current fallback range in frames (for pause/resume and loop restart).
     qint64 fbStartFrame_ = 0, fbEndFrame_ = 0;
+    // Frame where the last Play session started (Qt path). Stop keeps the
+    // playhead in place; pressing Play again resumes from this point.
+    qint64 lastPlayStartFrame_ = -1;
     bool fbLooping_ = false;
     bool wasPlaying_ = false;           // fallback session active (vs. stopped/paused)
     qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran

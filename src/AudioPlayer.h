@@ -112,8 +112,12 @@ private:
     qint64 pumpFrameBytes_ = 0;
     int pumpPeriodMs_ = 20;
 
-    qint64 posFrames_ = 0;       // next frame to output
-    qint64 startFrames_ = 0;     // where Play began (for Stop rewind)
+    // Frame where the most recent play session started; used by MainWindow
+    // so that pressing Play after Stop resumes from that point.
+    qint64 lastStartFrame() const { return startFrames_; }
+
+    qint64 posFrames_ = 0;       // current playback position (kept after Stop)
+    qint64 startFrames_ = 0;     // where the last Play session began (resume point)
     qint64 loopStart_ = 0, loopEnd_ = 0;
     bool looping_ = false;
     bool playing_ = false;
