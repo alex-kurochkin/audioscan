@@ -3,8 +3,24 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QStandardPaths>
 #include <algorithm>
 #include <cmath>
+
+namespace {
+// Resolve an external player up front. QProcess::start() succeeds even when
+// the binary doesn't exist (execvp failure surfaces asynchronously), which
+// previously left us spawning a zombie "aplay" pipe and silently losing all
+// audio. Returning an empty string lets the factory decline this sink so the
+// next candidate (ffplay) gets used immediately.
+QString resolveProgram(const QString &program) {
+    const QString abs = QStandardPaths::findExecutable(program);
+    if (!abs.isEmpty()) return abs;
+    qWarning().noquote() << QStringLiteral("AudioPlayer: '%1' not found in PATH")
+                                .arg(program);
+    return QString();
+}
+} // namespace
 
 ProcessSink::ProcessSink(const QString &program, const QStringList &args,
                          QObject *parent)
@@ -23,6 +39,15 @@ qint64 ProcessSink::writeData(const char *data, qint64 len) {
     if (!ensureStarted()) return -1;
     proc_->write(data, len);
     proc_->waitForBytesWritten(500);
+    // A dead child (e.g. "aplay: not found" — QProcess::start() succeeds even
+    // when execvp fails; the failure only surfaces asynchronously as
+    // FailedToStart) must be reported so AudioPlayer can drop to the next
+    // sink instead of silently pumping bytes into a zombie process.
+    if (proc_->state() == QProcess::NotRunning) {
+        qWarning().noquote() << QStringLiteral("AudioPlayer: sink '%1' died (exitCode=%2)")
+                                    .arg(program_).arg(proc_->exitCode());
+        return -1;
+    }
     return len;
 }
 
@@ -38,18 +63,39 @@ bool ProcessSink::ensureStarted() {
     proc_ = new QProcess(this);
     proc_->setProgram(program_);
     proc_->setArguments(args_);
-    // ForwardedErrorChannel would spam the terminal with child chatter
-    // (e.g. libmpg123 warnings on broken MP3s). Discard stderr; failures
-    // are still surfaced via "failed to start" above and exit-code checks.
-    proc_->setProcessChannelMode(QProcess::MergedChannels);
+    // Keep stderr separate (do NOT use MergedChannels): anything the child
+    // writes to stderr ("aplay: sound.c:341: failed reason..." etc.) lands in
+    // the readyReadStandardError buffer and is logged on failure below.
+    // stdout is discarded so routine child chatter (libmpg123 warnings on
+    // broken MP3s) doesn't spam the terminal.
+    proc_->setProcessChannelMode(QProcess::SeparateChannels);
     proc_->setStandardOutputFile(QStringLiteral("/dev/null"));
     proc_->start();
+    // waitForStarted() only confirms our fork/exec helper ran; an ENOENT on
+    // the real binary arrives one event-loop turn later as FailedToStart.
+    // Give that signal a chance to arrive before declaring success.
     if (!proc_->waitForStarted(3000)) {
+        const QString err = proc_->errorString();
+        const QByteArray se = proc_->readAllStandardError();
         qWarning().noquote()
-            << QStringLiteral("AudioPlayer: failed to start '%1'").arg(program_);
+            << QStringLiteral("AudioPlayer: failed to start '%1': %2%3")
+                   .arg(program_, err,
+                        se.isEmpty() ? QString()
+                                     : QStringLiteral(" | stderr: %1")
+                                           .arg(QString::fromUtf8(se).trimmed()));
         delete proc_;
         proc_ = nullptr;
         return false;
+    }
+    // Drain any early stderr the child produced while opening the device and
+    // echo it once — this is usually the exact ALSA error we're debugging.
+    {
+        proc_->waitForReadyRead(150);
+        const QByteArray se = proc_->readAllStandardError();
+        if (!se.trimmed().isEmpty())
+            qWarning().noquote()
+                << QStringLiteral("AudioPlayer: sink '%1' stderr: %2")
+                       .arg(program_, QString::fromUtf8(se).trimmed());
     }
     return true;
 }
@@ -92,14 +138,18 @@ QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
     // Spawn with the player's current volume (setVolumeApplier wires this up);
     // live slider changes respawn the process via AudioPlayer::
     // restartOutputKeepingPosition().
+    const QString prog = resolveProgram(QStringLiteral("aplay"));
+    if (prog.isEmpty()) return nullptr;   // alsa-utils not installed
     auto *ap = qobject_cast<AudioPlayer *>(parent);
     const double v = ap ? ap->volume() : 1.0;
-    auto *s = new ProcessSink(QStringLiteral("aplay"), aplayArgsFor(fmt, v), parent);
+    auto *s = new ProcessSink(prog, aplayArgsFor(fmt, v), parent);
     s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
     return s;
 }
 
 QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
+    const QString prog = resolveProgram(QStringLiteral("ffplay"));
+    if (prog.isEmpty()) return nullptr;   // ffmpeg not installed
     QStringList args;
     // NOTE: ffplay has no -autoexit option; it exits on EOF of stdin input.
     // The pump always feeds signed 16-bit PCM (see AudioPlayer::play()), so
@@ -112,7 +162,7 @@ QIODevice *makeFfplaySink(const QAudioFormat &fmt, QObject *parent) {
          << "-ar" << QString::number(fmt.sampleRate())
          << "-ac" << QString::number(fmt.channelCount())
          << "-i" << "-";
-    auto *s = new ProcessSink(QStringLiteral("ffplay"), args, parent);
+    auto *s = new ProcessSink(prog, args, parent);
     s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
     return s;
 }

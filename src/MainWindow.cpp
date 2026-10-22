@@ -682,11 +682,12 @@ void MainWindow::wirePlayerSignals() {
             warned = true;
             qWarning() << "MainWindow: Qt audio output unavailable, trying aplay/ffplay fallback";
         }
-        if (QFileInfo::exists(QStringLiteral("/usr/bin/aplay")) ||
-            !QStandardPaths::findExecutable(QStringLiteral("aplay")).isEmpty())
-            return makeAplaySink(fmt, &player_);
-        if (!QStandardPaths::findExecutable(QStringLiteral("ffplay")).isEmpty())
-            return makeFfplaySink(fmt, &player_);
+        // Try each candidate in order; a factory that can't resolve its
+        // binary returns nullptr so we transparently fall through to the
+        // next sink (previously a missing aplay produced a zombie pipe and
+        // total silence until the watchdog dragged us to the ffmpeg path).
+        if (QIODevice *s = makeAplaySink(fmt, &player_)) return s;
+        if (QIODevice *s = makeFfplaySink(fmt, &player_)) return s;
         return nullptr;
     });
 
