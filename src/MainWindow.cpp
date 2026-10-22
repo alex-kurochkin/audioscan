@@ -557,6 +557,11 @@ void MainWindow::buildUi() {
     connect(view_, &AudioView::markerClicked, this, &MainWindow::onMarkerClicked);
     connect(view_, &AudioView::markerMoved, this, [this](int, qint64) { persistMarkers(); });
     connect(view_, &AudioView::cursorMoved, this, [this](qint64 f) {
+        // Re-entrancy guard: programmatic cursor moves (playhead updates from
+        // the position timer, Stop rewind, seek echo) must not be mistaken
+        // for a user click and re-trigger a seek — that would cause an
+        // infinite setPlayheadFrame → cursorMoved → seekPlaybackTo loop.
+        if (seekingPlayback_) return;
         // While playing/paused, a click inside the waveform seeks: playback
         // jumps to the clicked position and continues from there.
         if (player_.isPlaying() || player_.isPaused() || playProc_) {
@@ -579,11 +584,15 @@ void MainWindow::buildUi() {
         playBtn_->setText(tr("Play"));
         // Natural end of a non-looped session (e.g. playback reached the end
         // of a selection): jump the visible cursor back to where the session
-        // started, so it matches what the next Play will resume from. With
-        // Loop on the range repeats forever, so finished() only fires on
-        // errors — leave the cursor alone then.
-        if (!loopBtn_->isChecked())
+        // started, so it matches what the next Play will resume from — the
+        // same rule Stop follows. With Loop on the range repeats forever, so
+        // finished() only fires on errors — leave the cursor alone then.
+        if (!loopBtn_->isChecked()) {
+            seekingPlayback_ = true;         // programmatic move: no re-seek
             view_->setPlayheadFrame(player_.startFrame());
+            lastPlayStartFrame_ = player_.startFrame();  // keep resume point in sync
+            seekingPlayback_ = false;
+        }
     });
     // Safety net: whenever the Qt sink state changes (finish, device error,
     // external stop), sync the button so it never sticks on "Pause".
@@ -956,16 +965,24 @@ void MainWindow::playPause() {
         qint64 cur = view_->playheadFrame();
         stopFfmpegFallback();            // keeps fbStart/End/Loop, resets wasPlaying_
         if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
+        seekingPlayback_ = true;         // programmatic move: no re-seek
         view_->setPlayheadFrame(cur);    // resume point remembered by -ss below
+        seekingPlayback_ = false;
+        fbPaused_ = true;                // mark the session as paused-resumable
         playBtn_->setText(tr("Play"));
         return;
     }
-    // Paused ffmpeg fallback: resume from the playhead position.
-    if (fbStartFrame_ > 0 || fbEndFrame_ > 0) {
+    // Paused ffmpeg fallback: resume from the playhead position. The guard
+    // covers both branches below because start/stop of the fallback process
+    // moves the cursor programmatically — those echoes are not user clicks.
+    if (fbPaused_ && (fbStartFrame_ > 0 || fbEndFrame_ > 0)) {
+        seekingPlayback_ = true;
         qint64 cur = view_->playheadFrame();
         if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
+        fbPaused_ = false;
         startFfmpegFallback(cur, fbEndFrame_, fbLooping_);
         playBtn_->setText(playProc_ ? tr("Pause") : tr("Play"));
+        seekingPlayback_ = false;
         if (!playProc_)
             statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
         return;
@@ -1064,9 +1081,11 @@ void MainWindow::stopPlayback() {
     const bool fbActive = playProc_ && wasPlaying_;
     const qint64 fbResume = fbActive ? fbStartFrame_ : -1;
 
+    seekingPlayback_ = true;   // all cursor moves below are programmatic
     player_.stop();
     stopFfmpegFallback();
     fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
+    fbPaused_ = false;                     // explicit Stop discards the paused session
     playBtn_->setText(tr("Play"));
     if (qtResume >= 0)
         view_->setPlayheadFrame(qtResume);
@@ -1074,48 +1093,53 @@ void MainWindow::stopPlayback() {
         view_->setPlayheadFrame(fbResume);
     else
         view_->setPlayheadFrame(player_.currentFrame());
+    seekingPlayback_ = false;
 }
 
 // Seek to a frame while playback is active, in whichever output path runs.
 // Called from the waveform click handler (AudioView::cursorMoved).
 void MainWindow::seekPlaybackTo(qint64 frame) {
     if (!audio_.valid) return;
-    frame = std::clamp(frame, qint64(0), audio_.totalFrames - 1);
+    // Re-entrancy guard: the playhead echoes below (setPlayheadFrame) and the
+    // process-restart path (stopFfmpegFallback rewinds the cursor to the
+    // session start) must not be re-interpreted as another user click.
+    seekingPlayback_ = true;
+    struct GuardReset { bool &g; ~GuardReset() { g = false; } } guardReset{seekingPlayback_};
 
     // In-process playback (Qt QAudioSink pull mode or pipe push-mode pump):
-    // jump the position and keep playing/paused state as it is.
+    // jump the position and keep playing/paused state as it is. The seek
+    // stays inside the session range — clicking past the end of a selection
+    // does NOT extend it: audio runs on from the click to the selection end
+    // and stops there, honouring the selection boundary.
     if (player_.isPlaying() || player_.isPaused()) {
         player_.seek(frame);
-        view_->setPlayheadFrame(frame);
+        view_->setPlayheadFrame(player_.currentFrame());
         return;
     }
 
     // External ffmpeg fallback process: restart it from the new position so
     // playback continues there. A click inside the current range keeps the
-    // range (and loop) intact; a click *outside* it (e.g. past the end of a
-    // selection while playing) retargets the session to [clicked frame ..
-    // file end] without looping, so playback actually continues from the
-    // click instead of instantly finishing at the old range boundary.
+    // range (and loop) intact. A click *outside* it (e.g. past the end of a
+    // selection while playing) retargets only the *start* to the clicked
+    // frame but preserves the range end (and the loop flag), so playback
+    // still stops at the selection boundary like every other output path.
     if (playProc_ || (fbStartFrame_ > 0) || (fbEndFrame_ > 0)) {
-        bool loop = fbLooping_;
-        qint64 end = fbEndFrame_;
-        const bool insideRange = frame >= fbStartFrame_ && frame < end;
-        if (!insideRange) {
-            end = audio_.totalFrames;
-            loop = false;   // clicked outside: play on to the file end
-        }
         const qint64 prevStart = fbStartFrame_, prevEnd = fbEndFrame_;
         const bool prevLoop = fbLooping_;
+        const bool wasPausedSession = !playProc_;   // paused fallback, kept for resume
+        qint64 end = prevEnd;
+        if (end <= frame) end = audio_.totalFrames; // no selection/loop in effect
         stopFfmpegFallback();             // kills the proc, clears resume state
-        startFfmpegFallback(frame, end, loop);
+        startFfmpegFallback(frame, end, prevLoop);
         if (playProc_) {
             playBtn_->setText(tr("Pause"));
             view_->setPlayheadFrame(frame);
-            lastPlayStartFrame_ = frame;  // next Play resumes from the click
+            lastPlayStartFrame_ = std::min(prevStart, frame); // Stop rewinds here
         } else {
             // Restart failed: restore the previous session state so Stop/Play
             // bookkeeping stays consistent, and report.
             fbStartFrame_ = prevStart; fbEndFrame_ = prevEnd; fbLooping_ = prevLoop;
+            fbPaused_ = wasPausedSession;
             playBtn_->setText(tr("Play"));
             statusBar()->showMessage(tr("Seek failed (external player could not restart)"), 4000);
         }
@@ -1155,8 +1179,13 @@ void MainWindow::updatePlayButton() {
 // the decoded buffer — the same path VLC uses successfully.
 
 void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop) {
+    // Programmatic session: the cursor moves inside (via stopFfmpegFallback
+    // and the playhead timer) must never be read as a user click-to-seek.
+    seekingPlayback_ = true;
+    struct GuardReset { bool &g; ~GuardReset() { g = false; } } guardReset{seekingPlayback_};
     stopFfmpegFallback();
     if (!audio_.valid || audio_.sampleRate <= 0) return;
+    fbPaused_ = false;   // a live session exists again
     fbStartFrame_ = startFrame;
     fbEndFrame_ = endFrame;
     fbLooping_ = loop;

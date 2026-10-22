@@ -117,6 +117,9 @@ private:
     qint64 lastPlayStartFrame_ = -1;
     bool fbLooping_ = false;
     bool wasPlaying_ = false;           // fallback session active (vs. stopped/paused)
+    bool fbPaused_ = false;             // paused fallback session kept for resume
+    bool seekingPlayback_ = false;      // re-entrancy guard: setPlayheadFrame →
+                                        // cursorMoved → seekPlaybackTo must not loop
     qint64 fbElapsedMs_ = 0;            // wall-clock ms the fallback proc ran
     QElapsedTimer fbClock_;             // timing for fbElapsedMs_
     qint64 fbFromFrame_ = 0;            // frame playback started from (this proc)

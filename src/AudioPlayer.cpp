@@ -340,17 +340,13 @@ void AudioPlayer::resume() {
 void AudioPlayer::seek(qint64 frame) {
     if (!buf_ || totalFrames_ == 0) return;
     frame = std::clamp(frame, qint64(0), totalFrames_ - 1);
-    // Seeking outside the active range (e.g. clicking past a selection while
-    // playing) retargets the session to [clicked position .. file end] so
-    // playback continues from the click instead of instantly "finishing".
-    if ((playing_ || paused_) && loopEnd_ > 0) {
-        if (frame >= loopEnd_) {
-            loopEnd_ = totalFrames_;
-            if (frame < startFrames_) startFrames_ = frame;
-        } else if (frame < startFrames_) {
-            startFrames_ = frame;
-        }
-    }
+    // A seek never invents a new play-start point: seeking *backwards* keeps
+    // it (so Stop still rewinds there), but seeking forward — e.g. clicking
+    // past the end of a finished selection — must NOT extend the session
+    // range. Playback then simply runs to the session's own end and stops,
+    // which is what makes the cursor honour the selection boundary.
+    if ((playing_ || paused_) && frame < startFrames_)
+        startFrames_ = frame;
     posFrames_ = frame;
     if (!playing_ && !paused_) {
         // No active session: just remember the position for the next resume.
