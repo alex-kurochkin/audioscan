@@ -404,13 +404,19 @@ void AudioPlayer::resumeOrStopToggle() {
 }
 
 void AudioPlayer::stop() {
+    const bool hadSession = playing_ || paused_;
     if (pump_) pump_->stop();
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
     if (outDevice_) { outDevice_->close(); delete outDevice_; outDevice_ = nullptr; }
     playing_ = false;
     paused_ = false;
     emit loopStateChanged(isLoopActive());   // session over: loop is no longer active
-    // Leave posFrames_ at the current playback position: Stop must NOT jump
-    // back to the start of the file/session (the "W" shortcut goes home).
-    emit positionChanged(posFrames_);
+    // Leave posFrames_ where it is: MainWindow decides what the cursor does
+    // on Stop (rewind to the session start) and on natural end-of-selection
+    // (also rewind to the start). Emitting here only when a session actually
+    // existed prevents a spurious cursor jump on redundant stop() calls —
+    // e.g. loadCurrentFile() stops an idle player, which would otherwise
+    // snap a freshly created selection's cursor back to frame 0.
+    if (hadSession)
+        emit positionChanged(posFrames_);
 }

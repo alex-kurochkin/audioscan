@@ -45,7 +45,8 @@ private slots:
     void onSearchClicked();
     void onRowDoubleClicked();
     void loadCurrentFile();
-    void playPause();
+    void playPause();      // Play/Pause button entry (syncs the label at the end)
+    void playPauseInner(); // raw start/pause/resume logic, no final sync
     void stopPlayback();
     void updatePlayButton();
     void prevFile();

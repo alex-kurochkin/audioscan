@@ -988,6 +988,15 @@ void MainWindow::updateActiveFileDisplay() {
 // ---------------- playback ----------------
 
 void MainWindow::playPause() {
+    playPauseInner();
+    // Single source of truth for the button label after every start/pause/
+    // resume path: whatever actually ended up running decides the text, so
+    // the button can never stay on "Play" while audio is playing (the old
+    // "blinks and stays Play" bug) nor on "Pause" after a failed start.
+    updatePlayButton();
+}
+
+void MainWindow::playPauseInner() {
     if (!audio_.valid) return;
     if (player_.isPlaying()) {          // in-process Qt sink is running
         player_.pause();
@@ -1032,36 +1041,51 @@ void MainWindow::playPause() {
     // Loop never invents its own repeat start: when armed, the session range
     // is re-derived exactly like a fresh Play does — selection if any,
     // otherwise the whole file.
+    // A selection always owns the playback range: with one present, every
+    // start/resume path below re-derives [selStart, selEnd) instead of using
+    // stale resume points. Without a selection the range is the whole file
+    // and playback begins at the visible cursor.
+    const bool loop = loopBtn_->isChecked();
+    const bool hasSel = view_->hasSelection();
+    const qint64 selStart = hasSel ? view_->selStart() : 0;
+    const qint64 selEnd   = hasSel ? view_->selEnd()   : audio_.totalFrames;
+
     if (lastPlayStartFrame_ >= 0) {
-        const bool loop = loopBtn_->isChecked();
         qint64 start = lastPlayStartFrame_;
         qint64 end   = audio_.totalFrames;
-        if (loop && view_->hasSelection()) {
-            start = view_->selStart();
-            end   = view_->selEnd();
+        if (hasSel) {
+            start = selStart;         // selection wins over any old resume point
+            end   = selEnd;
         } else if (loop) {
-            start = 0;
+            start = 0;                // loop without selection repeats the file
         }
         // Resume from the visible cursor when it sits inside the resume range
         // (e.g. after a live seek during the previous session); otherwise the
         // session simply starts at its recorded start point. The cursor and
         // the audible position must never disagree.
         const qint64 ph = view_->playheadFrame();
-        if (ph > start && ph < end) start = ph;
+        if (!hasSel && ph > start && ph < end) start = ph;
         player_.play(start, end, loop);
         if (player_.isPlaying()) {
+            lastPlayStartFrame_ = start;
             playBtn_->setText(tr("Pause"));
             QTimer::singleShot(250, this, [this, start, end, loop] {
                 if (player_.isPlaying() || playProc_) return;
                 DBG("Qt audio output failed instantly (resume), switching to ffmpeg fallback");
                 startFfmpegFallback(start, end, loop);
-                if (!playProc_)
+                if (playProc_) {
+                    lastPlayStartFrame_ = start;
+                    playBtn_->setText(tr("Pause"));
+                } else {
+                    playBtn_->setText(tr("Play"));
                     statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
+                }
             });
             return;
         }
         startFfmpegFallback(start, end, loop);
         if (playProc_) {
+            lastPlayStartFrame_ = start;
             playBtn_->setText(tr("Pause"));
             return;
         }
@@ -1069,13 +1093,8 @@ void MainWindow::playPause() {
         lastPlayStartFrame_ = -1;   // no working output — fall through to normal start
     }
 
-    qint64 start = view_->cursorFrame();
-    qint64 end = audio_.totalFrames;
-    if (view_->hasSelection()) {
-        start = view_->selStart();
-        end = view_->selEnd();
-    }
-    const bool loop = loopBtn_->isChecked();
+    qint64 start = hasSel ? selStart : view_->cursorFrame();
+    qint64 end = hasSel ? selEnd : audio_.totalFrames;
     DBG(QStringLiteral("playPause: file=%1 frames=%2 rate=%3 ch=%4")
         .arg(currentPath_).arg(audio_.totalFrames).arg(audio_.sampleRate).arg(audio_.channels));
 
@@ -1157,16 +1176,17 @@ void MainWindow::seekPlaybackTo(qint64 frame) {
 
     // External ffmpeg fallback process: restart it from the new position so
     // playback continues there. A click inside the current range keeps the
-    // range (and loop) intact. A click *outside* it (e.g. past the end of a
-    // selection while playing) retargets only the *start* to the clicked
-    // frame but preserves the range end (and the loop flag), so playback
-    // still stops at the selection boundary like every other output path.
+    // range (and loop) intact. A click *outside* it retargets only the
+    // *start* to the clicked frame; the end follows the selection rule —
+    // with a live selection playback still stops at the selection boundary,
+    // without one it runs to the end of the file.
     if (playProc_ || (fbStartFrame_ > 0) || (fbEndFrame_ > 0)) {
         const qint64 prevStart = fbStartFrame_, prevEnd = fbEndFrame_;
         const bool prevLoop = fbLooping_;
         const bool wasPausedSession = !playProc_;   // paused fallback, kept for resume
-        qint64 end = prevEnd;
-        if (end <= frame) end = audio_.totalFrames; // no selection/loop in effect
+        const bool hasSel = view_->hasSelection();
+        qint64 end = hasSel ? view_->selEnd() : audio_.totalFrames;
+        if (end <= frame) end = audio_.totalFrames; // clicked past the selection end
         stopFfmpegFallback();             // kills the proc, clears resume state
         startFfmpegFallback(frame, end, prevLoop);
         if (playProc_) {
