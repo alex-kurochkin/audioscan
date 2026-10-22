@@ -2,6 +2,9 @@
 #include <QObject>
 #include <QString>
 
+#include <functional>
+#include <utility>
+
 #include "AudioPlayer.h"
 #include "FfmpegFallbackController.h"
 
@@ -43,10 +46,17 @@ public:
     void setFallback(FfmpegFallbackController *fb) { fb_ = fb; }
     FfmpegFallbackController *fallback() const { return fb_; }
 
+    // `hasAudio` is the document-state provider (MainWindow reports
+    // audio_.valid). The controller only ever holds a pointer to the AudioData
+    // member — it is never null once wired — so "is a file loaded" cannot be
+    // derived from the pointer itself. It must come from this provider.
     void setContext(AudioData *audio, AudioView *view, QPushButton *loopBtn,
-                    QPushButton *playBtn) {
+                    QPushButton *playBtn, std::function<bool()> hasAudio = {}) {
         audio_ = audio; view_ = view; loopBtn_ = loopBtn; playBtn_ = playBtn;
+        hasAudio_ = std::move(hasAudio);
     }
+
+    bool hasLoadedAudio() const { return audio_ && (!hasAudio_ || hasAudio_()); }
 
     // ---- entry points (wired to buttons/hotkeys by MainWindow) ----
     // All public entry points are crash-proof by contract: they must work
@@ -94,6 +104,7 @@ private:
     FfmpegFallbackController *fb_ = nullptr; // not owned
     PlayerUi *ui_ = nullptr;
     AudioData *audio_ = nullptr;
+    std::function<bool()> hasAudio_;
     AudioView *view_ = nullptr;
     QPushButton *loopBtn_ = nullptr;
     QPushButton *playBtn_ = nullptr;

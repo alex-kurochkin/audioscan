@@ -458,7 +458,11 @@ void MainWindow::buildUi() {
     // The controller needs the widget context to make play/pause/loop
     // decisions (selection, cursor, button labels). Without this every
     // entry point bails out silently — "Play does nothing".
-    pc_->setContext(&audio_, view_, loopBtn_, playBtn_);
+    // audio_ is a member (never null), so "file loaded" must be reported
+    // through the hasAudio provider — the controller cannot infer it from
+    // the pointer itself.
+    pc_->setContext(&audio_, view_, loopBtn_, playBtn_,
+                    [this] { return audio_.valid; });
     fb_->setProviders(
         [this]() -> const AudioData * { return &audio_; },
         [this]() -> qint64 { return view_->playheadFrame(); },
