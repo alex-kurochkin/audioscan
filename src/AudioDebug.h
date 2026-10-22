@@ -65,15 +65,13 @@ inline QtMessageHandler gPrevHandler = nullptr;
 
 inline void handler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg) {
     static const char *tag[] = {"DEBUG", "INFO", "WARNING", "CRITICAL", "FATAL"};
-    // Sink lifecycle chatter ("spawning sink ...", "sink ... running (pid=N)")
-    // is routine success reporting — keep it at its own level instead of
-    // escalating qDebug/qInfo records to FATAL in the log file.
+    // NOTE: we used to demote messages containing "spawning sink"/"running
+    // (pid=" from FATAL to INFO here. That was a band-aid: the real problem
+    // was that healthy lifecycle chatter was logged through qInfo(), which
+    // this handler stamps with whatever level Qt reports — and on some Qt
+    // builds qInfo records arrived mislabeled. The spawn/pid lines now use
+    // DBG() directly, so no string sniffing is needed in the handler.
     QtMsgType t = type;
-    if (type == QtFatalMsg &&
-        (msg.contains(QLatin1String("spawning sink")) ||
-         msg.contains(QLatin1String("running (pid=")))) {
-        t = QtInfoMsg;
-    }
     const int lvl = qMin(int(t), 4);
     const QString stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz"));

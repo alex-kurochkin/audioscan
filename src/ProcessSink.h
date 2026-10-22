@@ -29,6 +29,10 @@ protected:
 private:
     bool ensureStarted();
     void shutdown();
+    // Synchronously finish the child (EOF -> wait -> terminate -> kill).
+    // Needed because shutdown() only defers escalation via a QTimer, which
+    // never fires if the sink object is destroyed right after.
+    void reapChild(qint64 waitMs);
     QString program_;
     QStringList args_;
     QProcess *proc_ = nullptr;

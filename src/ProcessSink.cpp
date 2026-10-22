@@ -1,6 +1,8 @@
 #include "ProcessSink.h"
 #include "AudioPlayer.h"
 
+#include "AudioDebug.h"
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QStandardPaths>
@@ -26,11 +28,42 @@ ProcessSink::ProcessSink(const QString &program, const QStringList &args,
                          QObject *parent)
     : QIODevice(parent), program_(program), args_(args) {}
 
-ProcessSink::~ProcessSink() { shutdown(); }
+ProcessSink::~ProcessSink() {
+    shutdown();
+    // Reap synchronously: the deferred QTimer in shutdown() can no longer
+    // run once this object is gone, so without this the child outlives its
+    // QProcess ("QProcess: Destroyed while process ("/usr/bin/aplay") is
+    // still running.") and an orphaned aplay keeps hogging the ALSA device.
+    reapChild(2000);
+}
+
+void ProcessSink::reapChild(qint64 waitMs) {
+    // Synchronously finish the child: close our write end (EOF), let aplay
+    // drain the buffered PCM and exit on its own, then SIGTERM/SIGKILL as a
+    // last resort. Called from the destructor AND from restartWithArgs():
+    // without this, shutdown()'s deferred QTimer escalation never runs once
+    // the object is gone, QProcess gets destroyed while the child still
+    // lives ("QProcess: Destroyed while process ("/usr/bin/aplay") is still
+    // running." + orphaned aplay holding the ALSA device), and restarting
+    // the sink raced the old child for the device.
+    if (!proc_) return;
+    if (proc_->state() != QProcess::NotRunning) {
+        proc_->closeWriteChannel();
+        if (!proc_->waitForFinished(int(waitMs))) {
+            proc_->terminate();
+            if (!proc_->waitForFinished(1000)) proc_->kill();
+            proc_->waitForFinished(1000);
+        }
+    }
+}
 
 void ProcessSink::restartWithArgs(const QStringList &newArgs) {
     args_ = newArgs;
     shutdown();
+    // The next play() must not start a fresh child while the old one is
+    // still draining the ALSA device — reap it here (blocking is safe:
+    // this runs from UI code inside the event loop, not teardown).
+    reapChild(2000);
 }
 
 qint64 ProcessSink::readData(char *, qint64) { return 0; }
@@ -101,8 +134,13 @@ bool ProcessSink::ensureStarted() {
     proc_->setStandardOutputFile(QStringLiteral("/dev/null"));
     // Log the exact command line once: when a child misbehaves (bad option,
     // device busy, wrong format) this is the first thing to reproduce by hand.
-    qInfo().noquote() << QStringLiteral("AudioPlayer: spawning sink '%1 %2'")
-                             .arg(program_, args_.join(QLatin1Char(' ')));
+    // NOTE: DBG() (not qInfo/qWarning) on purpose — those stream operators
+    // are captured by our global message handler and stamped as [INFO]/
+    // [WARNING] regardless of the level we intend; DBG always lands as
+    // [DEBUG]. ("spawning sink ... running" lines previously showed up as
+    // scary [FATAL] in the user's logs for perfectly healthy startups.)
+    DBG(QStringLiteral("AudioPlayer: spawning sink '%1 %2'")
+            .arg(program_, args_.join(QLatin1Char(' '))));
     proc_->start();
     // waitForStarted() only confirms our fork/exec helper ran; an ENOENT on
     // the real binary arrives one event-loop turn later as FailedToStart.
@@ -130,8 +168,8 @@ bool ProcessSink::ensureStarted() {
                 << QStringLiteral("AudioPlayer: sink '%1' stderr: %2")
                        .arg(program_, QString::fromUtf8(se).trimmed());
     }
-    qInfo().noquote() << QStringLiteral("AudioPlayer: sink '%1' running (pid=%2)")
-                             .arg(program_).arg(proc_->processId());
+    DBG(QStringLiteral("AudioPlayer: sink '%1' running (pid=%2)")
+            .arg(program_).arg(proc_->processId()));
     started_ = true;
     return true;
 }
