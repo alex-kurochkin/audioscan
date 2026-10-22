@@ -18,7 +18,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
-#include <QMenu>
+#include <QCheckBox>
+#include <QDialogButtonBox>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QInputDialog>
@@ -343,7 +344,8 @@ void MainWindow::buildUi() {
 
     columnsBtn_ = new QToolButton(tb);
     columnsBtn_->setText(tr("Columns"));
-    columnsBtn_->setPopupMode(QToolButton::InstantPopup);
+    columnsBtn_->setToolTip(tr("Choose which columns to display"));
+    connect(columnsBtn_, &QToolButton::clicked, this, &MainWindow::openColumnsDialog);
     tb->addWidget(columnsBtn_);
 
     // Single toggle button instead of a dropdown: shows the mode it will switch TO.
@@ -754,17 +756,15 @@ void MainWindow::buildUi() {
             if (rows[i].path == path) { model_->setPreview(i, img); break; }
     });
 
-    rebuildColumnMenu();
 }
 
-void MainWindow::rebuildColumnMenu() {
-    auto *menu = new QMenu(columnsBtn_);
-    // Start from the persisted *full* order (all columns, visible + hidden)
-    // so that a drag-reorder of hidden columns is remembered too; fall back
-    // to the legacy visible-only key for old settings files.
+// Compute the persisted full order of live columns (visible + hidden) and the
+// currently shown set, honouring legacy settings keys. Shared by the Columns
+// dialog so newly-shown columns land where drag-reorder left them.
+static void currentColumnLayout(FileTableModel *model, QVector<int> &fullOrder,
+                                QSet<int> &shown) {
     QStringList fullKeys = Settings::instance().columnOrder();
     if (fullKeys.isEmpty()) fullKeys = Settings::instance().visibleColumns();
-    QVector<int> fullOrder;
     for (const QString &key : fullKeys) {
         int col = FileTableModel::columnFromKey(key);
         // The Folder column is retired — drop it even if an old settings
@@ -775,10 +775,9 @@ void MainWindow::rebuildColumnMenu() {
     for (int c = 0; c <= int(FileTableModel::ColModified); ++c)
         if (!fullOrder.contains(c)) fullOrder << c;
 
-    // Visible set: intersection with the legacy visible-columns key, so an
-    // upgrade from older configs keeps exactly the previously shown columns.
+    // Visible set: intersection with the visible-columns key, so an upgrade
+    // from older configs keeps exactly the previously shown columns.
     const QStringList visKeys = Settings::instance().visibleColumns();
-    QSet<int> shown;
     if (!visKeys.isEmpty()) {
         for (const QString &key : visKeys) {
             int col = FileTableModel::columnFromKey(key);
@@ -787,29 +786,67 @@ void MainWindow::rebuildColumnMenu() {
     } else {
         for (int c : fullOrder) shown.insert(c);
     }
+    Q_UNUSED(model);
+}
 
-    // Menu actions in the persisted full order -> toggling preserves relative
-    // positions and lets newly-shown columns land where the user left them.
-    for (int c : fullOrder) {
-        auto *act = menu->addAction(model_->columnName(c));
-        act->setCheckable(true);
-        act->setData(c);                       // model column id, not index
-        act->setChecked(shown.contains(c));
+void MainWindow::openColumnsDialog() {
+    QVector<int> fullOrder;
+    QSet<int> shown;
+    currentColumnLayout(model_, fullOrder, shown);
+
+    QStringList labels;
+    for (int c : fullOrder) labels << model_->columnName(c);
+
+    ColumnsDialog dlg(labels, shown, this);
+    dlg.setWindowTitle(tr("Columns"));
+    if (dlg.exec() != QDialog::Accepted) return;   // Cancel: nothing changes
+
+    const QSet<int> sel = dlg.selected();
+    if (sel.isEmpty()) {
+        QMessageBox::warning(this, tr("Columns"),
+                             tr("At least one column must be visible."));
+        return;
     }
-    connect(menu, &QMenu::triggered, this, [this, menu] {
-        QVector<int> vis;
-        const auto acts = menu->actions();
-        for (auto *a : acts)
-            if (a->isChecked()) vis << a->data().toInt();
-        model_->updateVisibleColumns(vis);
-        QStringList keys;
-        for (int cc : vis) keys << FileTableModel::columnKey(cc);
-        Settings::instance().setVisibleColumns(keys);
-        QStringList allKeys;
-        for (auto *a : acts) allKeys << FileTableModel::columnKey(a->data().toInt());
-        Settings::instance().setColumnOrder(allKeys);
-    });
-    columnsBtn_->setMenu(menu);
+    // Keep the persisted relative order; just filter to the chosen set.
+    QVector<int> vis;
+    for (int c : fullOrder)
+        if (sel.contains(c)) vis << c;
+    model_->updateVisibleColumns(vis);
+
+    QStringList keys;
+    for (int cc : vis) keys << FileTableModel::columnKey(cc);
+    Settings::instance().setVisibleColumns(keys);
+    QStringList allKeys;
+    for (int cc : fullOrder) allKeys << FileTableModel::columnKey(cc);
+    Settings::instance().setColumnOrder(allKeys);
+    applyTableColumnWidths();
+    updateSortIndicator();
+}
+
+ColumnsDialog::ColumnsDialog(const QStringList &labels, const QSet<int> &shown,
+                             QWidget *parent)
+    : QDialog(parent) {
+    auto *lay = new QVBoxLayout(this);
+    lay->addWidget(new QLabel(tr("Show columns:")));
+    for (int i = 0; i < labels.size(); ++i) {
+        auto *cb = new QCheckBox(labels[i], this);
+        cb->setChecked(shown.contains(i));
+        checks_.append({i, cb});
+        lay->addWidget(cb);
+    }
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    lay->addStretch();
+    lay->addWidget(bb);
+    setWindowTitle(tr("Columns"));
+}
+
+QSet<int> ColumnsDialog::selected() const {
+    QSet<int> out;
+    for (const auto &p : checks_)
+        if (p.second->isChecked()) out.insert(p.first);
+    return out;
 }
 
 // Persist the current visual order of all live columns (visible ones first,

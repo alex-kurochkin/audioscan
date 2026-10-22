@@ -14,6 +14,8 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QLabel>
+#include <QDialog>
+#include <QCheckBox>
 #include <functional>
 class QProcess;
 #include "AudioFile.h"
@@ -81,6 +83,7 @@ private:
     void sortByModelColumn(int modelCol, Qt::SortOrder order);  // sort + indicator/selection sync
     void updateSortIndicator();      // keep the header arrow on the right visual section
     void saveColumnLayout();         // persist column order/visibility to settings
+    void openColumnsDialog();        // "Columns" button -> chooser dialog (Save/Cancel)
     void applySavedColumnOrder();    // restore visual header order from settings on startup
     void saveColumnWidths();         // persist per-column widths to the SQLite session table
     void loadColumnWidths();         // read persisted widths into memory (once)
@@ -90,7 +93,6 @@ private:
     void applyEditToRange(std::function<void()> op, const QString &type,
                           qint64 off, qint64 len,
                           const QVector<UndoRecord::MarkerDelta> &deltas = {});
-    void rebuildColumnMenu();
     int currentRow() const;      // sorted/view row -> source row mapping handled internally
     void restorePendingSession(); // select+load last file & seek after a scan (spec 10.2)
 
@@ -161,4 +163,18 @@ private:
     // the window title ("AudioScout - <file name>").
     void updateActiveFileDisplay();
     PreviewWorker *previewWorker_ = nullptr;
+};
+
+// Lightweight column chooser used by the "Columns" toolbar button: a popup
+// dialog with one checkbox per live column (in the persisted full order) and
+// Save/Cancel buttons. Cancel leaves the table untouched; Save applies the
+// new visible set and persists it (header order is kept as-is).
+class ColumnsDialog : public QDialog {
+public:
+    explicit ColumnsDialog(const QStringList &labels, const QSet<int> &shown,
+                           QWidget *parent = nullptr);
+    QSet<int> selected() const;
+
+private:
+    QVector<QPair<int, QCheckBox *>> checks_;
 };
