@@ -1,5 +1,7 @@
 #include "Renderer.h"
 #include <QPainter>
+#include <QtGlobal>   // qMax/qMin/std::clamp helpers
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <vector>
@@ -65,8 +67,13 @@ QImage Renderer::waveform(const AudioData &audio, int width, int height, bool) {
             mx = std::max(mx, mono);
         }
         int mid = height / 2;
-        int lo = mid + int(mn * (height / 2 - 1));
-        int hi = mid + int(mx * (height / 2 - 1));
+        // Clamp the amplitude-derived bounds to the image: samples outside
+        // [-1, 1] (clipping, float files) would otherwise produce negative y
+        // and spam "QImage::setPixel: coordinate out of range" warnings.
+        const int top = qMax(0, mid - (height / 2 - 1));
+        const int bottom = qMin(height - 1, mid + (height / 2 - 1));
+        int lo = std::clamp(mid + int(mn * (height / 2 - 1)), top, bottom);
+        int hi = std::clamp(mid + int(mx * (height / 2 - 1)), top, bottom);
         if (hi > lo) std::swap(hi, lo);
         for (int y = hi; y <= lo; ++y) img.setPixel(x, y, wave.rgb());
         if (prevLo >= 0 && lo == hi) { // fill gaps between columns

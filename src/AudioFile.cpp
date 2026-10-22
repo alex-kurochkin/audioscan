@@ -178,8 +178,15 @@ bool AudioFile::decodeWithFfmpeg(const QString &path, QString &tempOut, QString 
     p.setProgram(QStringLiteral("ffmpeg"));
     // Keep the ORIGINAL sample rate: forcing -ar 44100 would silently resample
     // material recorded at other rates and desync markers/playhead positions.
-    p.setArguments({"-y", "-loglevel", "error", "-i", path,
-                    "-acodec", "pcm_f32le", outPath});
+    QStringList args;
+    args << "-y" << "-hide_banner"
+         // Silence ffmpeg's informational chatter (e.g. "Guessed Channel
+         // Layout for raw PCM"). Real errors still reach stderr and are
+         // reported via readAllStandardError() below.
+         << "-loglevel" << "error"
+         << "-i" << path
+         << "-acodec" << "pcm_f32le" << outPath;
+    p.setArguments(args);
     p.start();
     if (!p.waitForStarted(5000)) {
         if (err) *err = QStringLiteral("Failed to start ffmpeg (is it installed?)");

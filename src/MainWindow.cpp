@@ -98,7 +98,11 @@ private:
         proc_ = new QProcess(this);
         proc_->setProgram(program_);
         proc_->setArguments(args_);
-        proc_->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+        // ForwardedErrorChannel would spam the terminal with child chatter
+        // (e.g. libmpg123 warnings on broken MP3s). Discard stderr; failures
+        // are still surfaced via "failed to start" above and exit-code checks.
+        proc_->setProcessChannelMode(QProcess::MergedChannels);
+        proc_->setStandardOutputFile(QStringLiteral("/dev/null"));
         proc_->start();
         if (!proc_->waitForStarted(3000)) {
             qWarning().noquote()
@@ -1603,7 +1607,7 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
     // whatever output is configured in the system sound settings — no need to
     // enumerate /proc/asound/cards or pick a card name manually.
     QStringList args;
-    args << "-hide_banner" << "-nostdin" << "-loglevel" << "warning" << "-re";
+    args << "-hide_banner" << "-nostdin" << "-loglevel" << "error" << "-re";
     if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
     args << "-t" << QString::number(durSec, 'f', 3);
     args << "-i" << inputPath << "-vn" << "-acodec" << "pcm_s16le"
@@ -1616,8 +1620,8 @@ void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool lo
     connect(playProc_, &QProcess::readyReadStandardError, this, [this] {
         const QString s = QString::fromUtf8(playProc_->readAllStandardError()).trimmed();
         if (!s.isEmpty()) {
+            // Keep it in the opt-in debug log only; don't spam the terminal.
             DBG(QStringLiteral("ffmpeg stderr: %1").arg(s));
-            qWarning().noquote() << "[audioscout][ffmpeg]" << s;
         }
     });
     wasPlaying_ = true;
