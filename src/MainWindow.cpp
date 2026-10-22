@@ -457,6 +457,7 @@ void MainWindow::buildUi() {
         [this](qint64 f) { setPlayhead(f, true); },
         [this]() -> bool { return loopBtn_->isChecked(); });
     fb_->setOnFinished([this](bool error) { pc_->onFallbackFinished(error); });
+    fb_->setCurrentPathProvider([this] { return currentPath_; });
 
     connect(playBtn_, &QPushButton::clicked, this, [this] { pc_->playPause(); });
     connect(stopBtn, &QPushButton::clicked, this, [this] { pc_->stopPlayback(); });
@@ -512,73 +513,21 @@ void MainWindow::buildUi() {
         if (seekingPlayback_) return;
         // While playing/paused, a click inside the waveform seeks: playback
         // jumps to the clicked position and continues from there.
-        if (player_.isPlaying() || player_.isPaused() || playProc_) {
-            seekPlaybackTo(f);
+        if (player_.isPlaying() || player_.isPaused() || pc_->fallbackActive()) {
+            pc_->seekPlaybackTo(f);
             return;
         }
         // Stopped after a session: moving the cursor defines a new start
         // point for the next Play (overrides the "resume where it started"
         // behavior). W / Home jumping to 0 also flows through here.
-        if (lastPlayStartFrame_ >= 0) lastPlayStartFrame_ = f;
+        if (pc_->lastPlayStartFrame() >= 0) pc_->setLastPlayStartFrame(f);
         if (audio_.valid)
             Database::instance().setSessionState(currentDir_, currentPath_,
                                                  double(f) / audio_.sampleRate);
     });
 
-    connect(&player_, &AudioPlayer::positionChanged, this, [this](qint64 f) {
-        view_->setPlayheadFrame(f);
-    });
-    connect(&player_, &AudioPlayer::finished, this, [this] {
-        playBtn_->setText(tr("Play"));
-        // Natural end of a non-looped session (e.g. playback reached the end
-        // of a selection): jump the visible cursor back to where the session
-        // started, so it matches what the next Play will resume from — the
-        // same rule Stop follows. With Loop on the range repeats forever, so
-        // finished() only fires on errors — leave the cursor alone then.
-        if (!loopBtn_->isChecked()) {
-            seekingPlayback_ = true;         // programmatic move: no re-seek
-            view_->setPlayheadFrame(player_.startFrame());
-            lastPlayStartFrame_ = player_.startFrame();  // keep resume point in sync
-            seekingPlayback_ = false;
-        }
-        updatePlayButton();   // session over: drop any stale Pause/Loop styling
-    });
-    // Safety net: whenever the Qt sink state changes (finish, device error,
-    // external stop), sync the button so it never sticks on "Pause".
-    connect(&player_, &AudioPlayer::positionChanged, this,
-            [this] { updatePlayButton(); });
-
-    // Loop-button highlight must follow *actual* loop activity: re-evaluate
-    // it whenever the player arms/disarms audible looping (start, stop,
-    // finish, toggle) — see updatePlayButton().
-    connect(&player_, &AudioPlayer::loopStateChanged, this,
-            [this](bool) { updatePlayButton(); });
-
-    // Live volume for push-mode outputs (aplay/ffplay pipe): those processes
-    // read their gain only at startup, so respawn them with the new value
-    // while keeping the playback position. Pull mode needs nothing: the PCM
-    // generator multiplies by the atomic volume_ on every chunk.
-    player_.setVolumeApplier([this](double) {
-        player_.restartOutputKeepingPosition();
-    });
-
-    // Audio output strategy: prefer Qt Multimedia's own QAudioSink; if the
-    // default device is null or rejects our format, fall back to piping raw
-    // PCM to "aplay" (ALSA) and then "ffplay" (ffmpeg). The factory returns
-    // an opened write-only QIODevice; AudioPlayer wraps it in a QAudioSink.
-    player_.setSinkFactory([this](const QAudioFormat &fmt) -> QIODevice * {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            qWarning() << "MainWindow: Qt audio output unavailable, trying aplay/ffplay fallback";
-        }
-        if (QFileInfo::exists(QStringLiteral("/usr/bin/aplay")) ||
-            !QStandardPaths::findExecutable(QStringLiteral("aplay")).isEmpty())
-            return makeAplaySink(fmt, &player_);
-        if (!QStandardPaths::findExecutable(QStringLiteral("ffplay")).isEmpty())
-            return makeFfplaySink(fmt, &player_);
-        return nullptr;
-    });
+    // Player engine signals are wired once, in wirePlayerSignals() below.
+    wirePlayerSignals();
 
     previewWorker_ = new PreviewWorker(this);
     connect(previewWorker_, &PreviewWorker::ready, this, [this](const QString &path, const QString &imgPath) {
@@ -600,221 +549,6 @@ void MainWindow::buildUi() {
 
 }
 
-// Compute the persisted full order of live columns (visible + hidden) and the
-// currently shown set, honouring legacy settings keys. Shared by the Columns
-// dialog so newly-shown columns land where drag-reorder left them.
-static void currentColumnLayout(FileTableModel *model, QVector<int> &fullOrder,
-                                QSet<int> &shown) {
-    QStringList fullKeys = Settings::instance().columnOrder();
-    if (fullKeys.isEmpty()) fullKeys = Settings::instance().visibleColumns();
-    for (const QString &key : fullKeys) {
-        int col = FileTableModel::columnFromKey(key);
-        // The Folder column is retired — drop it even if an old settings
-        // file still lists it.
-        if (col >= 0 && FileTableModel::isLiveColumn(col) && !fullOrder.contains(col))
-            fullOrder << col;
-    }
-    for (int c = 0; c <= int(FileTableModel::ColModified); ++c)
-        if (!fullOrder.contains(c)) fullOrder << c;
-
-    // Visible set: intersection with the visible-columns key, so an upgrade
-    // from older configs keeps exactly the previously shown columns.
-    const QStringList visKeys = Settings::instance().visibleColumns();
-    if (!visKeys.isEmpty()) {
-        for (const QString &key : visKeys) {
-            int col = FileTableModel::columnFromKey(key);
-            if (col >= 0 && FileTableModel::isLiveColumn(col)) shown.insert(col);
-        }
-    } else {
-        for (int c : fullOrder) shown.insert(c);
-    }
-    Q_UNUSED(model);
-}
-
-void MainWindow::openColumnsDialog() {
-    QVector<int> fullOrder;
-    QSet<int> shown;
-    currentColumnLayout(model_, fullOrder, shown);
-
-    QStringList keys, labels;
-    for (int c : fullOrder) {
-        keys << FileTableModel::columnKey(c);
-        labels << model_->columnName(c);
-    }
-
-    ColumnsDialog dlg(keys, labels, shown, this);
-    dlg.setWindowTitle(tr("Columns"));
-    if (dlg.exec() != QDialog::Accepted) return;   // Cancel: nothing changes
-
-    const QStringList selKeys = dlg.selectedKeys();
-    if (selKeys.isEmpty()) {
-        QMessageBox::warning(this, tr("Columns"),
-                             tr("At least one column must be visible."));
-        return;
-    }
-    // Flush the currently displayed widths into the in-memory map first, so
-    // columns that are about to be re-shown come back with their last size
-    // instead of the built-in default.
-    colWidthSaveTimer_.stop();
-    if (table_ && model_) {
-        auto *hdr = table_->horizontalHeader();
-        const auto &visCols = model_->visibleColumns();
-        for (int log = 0; log < visCols.size(); ++log)
-            if (!hdr->isSectionHidden(log))
-                colWidths_.insert(visCols[log], table_->columnWidth(log));
-    }
-
-    // Keep the persisted relative order; just filter to the chosen set.
-    QVector<int> vis;
-    QStringList visKeys;
-    for (int i = 0; i < fullOrder.size(); ++i) {
-        if (selKeys.contains(keys.at(i))) {
-            vis << fullOrder[i];
-            visKeys << keys.at(i);
-        }
-    }
-    model_->updateVisibleColumns(vis);
-
-    // updateVisibleColumns() resets the model -> the header falls back to the
-    // default order; re-apply the persisted drag-reorder right away so the
-    // visible arrangement matches what was saved on the previous run.
-    applySavedColumnOrder();
-
-    // Persist immediately (Save click): visible set + full order. The next
-    // start restores both from config.json via the persisted keys.
-    Settings::instance().setVisibleColumns(visKeys);
-    Settings::instance().setColumnOrder(keys);
-    loadColumnWidths();                       // pick up widths saved mid-run
-    saveColumnWidths();                       // widths -> SQLite session DB
-    QTimer::singleShot(0, this, [this] {      // after the model reset settles
-        applySavedColumnOrder();              // keep drag-reorder of header
-        applyTableColumnWidths();             // restore per-column sizes
-        updateSortIndicator();
-    });
-}
-
-ColumnsDialog::ColumnsDialog(const QStringList &keys, const QStringList &labels,
-                             const QSet<int> &shown, QWidget *parent)
-    : QDialog(parent), keys_(keys) {
-    auto *lay = new QVBoxLayout(this);
-    lay->addWidget(new QLabel(tr("Show columns:")));
-    for (int i = 0; i < labels.size(); ++i) {
-        auto *cb = new QCheckBox(labels[i], this);
-        cb->setChecked(shown.contains(i));
-        checks_.append(cb);
-        lay->addWidget(cb);
-    }
-    auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    lay->addStretch();
-    lay->addWidget(bb);
-    setWindowTitle(tr("Columns"));
-}
-
-QStringList ColumnsDialog::selectedKeys() const {
-    QStringList out;
-    for (int i = 0; i < checks_.size(); ++i)
-        if (checks_[i]->isChecked()) out << keys_.at(i);
-    return out;
-}
-
-// Persist the current visual order of all live columns (visible ones first,
-// in header order; hidden ones appended in their last known relative order).
-void MainWindow::saveColumnLayout() {
-    if (!table_ || !model_) return;
-    auto *hdr = table_->horizontalHeader();
-    const auto &visCols = model_->visibleColumns();
-    QStringList visibleOrder;
-    for (int log = 0; log < visCols.size(); ++log) {
-        const int v = hdr->visualIndex(log);
-        if (v < 0) continue;
-        visibleOrder << QStringLiteral("%1:%2").arg(v).arg(FileTableModel::columnKey(visCols.value(log)));
-    }
-    std::sort(visibleOrder.begin(), visibleOrder.end());
-    QStringList shownKeys;
-    for (const QString &s : visibleOrder) shownKeys << s.section(':', 1);
-
-    // Keep hidden columns in their previously saved relative order.
-    QStringList prevFull = Settings::instance().columnOrder();
-    if (prevFull.isEmpty()) prevFull = Settings::instance().visibleColumns();
-    QStringList full = shownKeys;
-    for (const QString &k : prevFull)
-        if (!full.contains(k)) full << k;
-    Settings::instance().setColumnOrder(full);
-    Settings::instance().setVisibleColumns(shownKeys);
-}
-
-// Re-apply the persisted visual order of the header sections after a model
-// reset (directory scan). moveSection() is idempotent: if the header already
-// matches the saved order, no sectionMoved signal fires and nothing changes.
-void MainWindow::applySavedColumnOrder() {
-    if (!table_ || !model_) return;
-    auto *hdr = table_->horizontalHeader();
-    QStringList fullKeys = Settings::instance().columnOrder();
-    // Fall back to the visible-columns key for legacy configs that predate
-    // the separate "full order" entry.
-    if (fullKeys.isEmpty()) fullKeys = Settings::instance().visibleColumns();
-    if (fullKeys.isEmpty()) return;
-    const auto &visCols = model_->visibleColumns();
-    QVector<int> targetVis;   // logical indices in the desired visual order
-    for (const QString &key : fullKeys) {
-        const int col = FileTableModel::columnFromKey(key);
-        if (col < 0) continue;
-        const int log = visCols.indexOf(col);
-        if (log >= 0 && !targetVis.contains(log)) targetVis << log;
-    }
-    for (int log = 0; log < visCols.size(); ++log)
-        if (!targetVis.contains(log)) targetVis << log;   // unseen columns last
-    for (int target = 0; target < targetVis.size(); ++target) {
-        const int cur = hdr->visualIndex(targetVis[target]);
-        if (cur != target) hdr->moveSection(cur, target);
-    }
-}
-
-// Read the per-column widths from config.json (all column settings live
-// there). Reloaded on every call (cheap) so widths saved by the Columns
-// dialog mid-run are picked up immediately. Widths previously stored in the
-// SQLite session table (older builds) are migrated once on the first load.
-void MainWindow::loadColumnWidths() {
-    const QMap<QString, int> map = Settings::instance().columnWidths();
-    for (auto it = map.begin(); it != map.end(); ++it) {
-        const int col = FileTableModel::columnFromKey(it.key());
-        if (col >= 0 && col < int(FileTableModel::ColCount) && it.value() > 0)
-            colWidths_.insert(col, it.value());
-    }
-    if (firstWidthLoad_) {
-        firstWidthLoad_ = false;
-        const QString legacy = Database::instance().sessionValue(QStringLiteral("colWidths"));
-        if (!legacy.isEmpty()) {
-            const QJsonObject obj = QJsonDocument::fromJson(legacy.toUtf8()).object();
-            QMap<QString, int> merged = Settings::instance().columnWidths();
-            for (auto it = obj.begin(); it != obj.end(); ++it) {
-                const int col = it.key().toInt();
-                const int w = it.value().toInt();
-                if (w > 0 && col >= 0 && col < int(FileTableModel::ColCount))
-                    merged.insert(FileTableModel::columnKey(col), w);
-            }
-            Settings::instance().setColumnWidths(merged);
-            Database::instance().setSessionValue(QStringLiteral("colWidths"), QString());
-        }
-    }
-}
-
-// Persist the current width of every visible column into config.json so
-// user-resized columns keep their size across restarts.
-void MainWindow::saveColumnWidths() {
-    if (!table_ || !model_) return;
-    auto *hdr = table_->horizontalHeader();
-    const auto &visCols = model_->visibleColumns();
-    QMap<QString, int> map = Settings::instance().columnWidths();
-    for (int log = 0; log < visCols.size(); ++log) {
-        if (hdr->isSectionHidden(log)) continue;
-        map.insert(FileTableModel::columnKey(visCols[log]),
-                   table_->columnWidth(log));
-    }
-    Settings::instance().setColumnWidths(map);
-}
 
 // ---------------- hotkeys ----------------
 
@@ -857,11 +591,10 @@ void MainWindow::applyHotkeys() {
         auto *sc = new QShortcut(QKeySequence(spaceSeq), this, nullptr, nullptr, Qt::WindowShortcut);
         connect(sc, &QShortcut::activated, this, [this] {
             if (Settings::instance().spaceStartStop()) {
-                const bool running = player_.isPlaying() || player_.isPaused() || playProc_;
-                if (running) stopPlayback();
-                else playPause();
+                if (pc_->isRunning()) pc_->stopPlayback();
+                else pc_->playPause();
             } else {
-                playPause();
+                pc_->playPause();
             }
         });
     }
@@ -878,47 +611,11 @@ void MainWindow::onDirSelected(const QString &path) {
     if (dir.isEmpty() || !QDir(dir).exists()) return;
     currentDir_ = dir;
 
-    // Background scan (spec 3.1/12): never block UI.
-    auto future = QtConcurrent::run([dir]() {
-        QVector<FileTableModel::Row> rows;
-        QDir d(dir);
-        const auto entries = d.entryInfoList(QDir::Files, QDir::Name);
-        for (const QFileInfo &fi : entries) {
-            if (!isAudioFile(fi.absoluteFilePath().toLower())) continue;
-            FileTableModel::Row r;
-            r.path = fi.absoluteFilePath();
-            r.name = fi.fileName();
-            r.size = fi.size();
-            // birthTime is often invalid on Linux filesystems; fall back to ctime.
-            r.created = fi.birthTime().isValid() ? fi.birthTime() : fi.metadataChangeTime();
-            if (!r.created.isValid()) r.created = fi.fileTime(QFileDevice::FileBirthTime);
-            r.modified = fi.lastModified();
-            AudioData meta;
-            QString err;
-            if (AudioFile::probe(r.path, meta, &err) && meta.valid) {
-                r.broken = false;
-                r.sampleRate = meta.sampleRate;
-                r.channels = meta.channels;
-                r.frames = meta.totalFrames;
-                r.sampleTypeName = meta.format == SampleFormat::Unknown
-                    ? QStringLiteral("compressed") : sampleFormatName(meta.format);
-                r.comment = meta.comment;
-            } else {
-                qWarning() << "scanDirectory: probe failed for" << r.path << "-" << err;
-                r.broken = true;   // red row, no params, no preview (spec 3.3)
-            }
-            rows.push_back(r);
-        }
-        return rows;
-    });
-    // poll-free completion via watcher
-    auto *watcher = new QFutureWatcher<QVector<FileTableModel::Row>>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, dir]() {
-        DirScanResult res2{dir, watcher->result()};
-        watcher->deleteLater();
-        onScanFinished(res2);
-    });
-    watcher->setFuture(future);
+    // Background scan (spec 3.1/12): never block UI — the DirScanner worker
+    // probes every audio file off-thread and delivers the rows through
+    // finished() (wired in buildUi()); results of superseded scans are
+    // dropped by the stale-dir check in onScanFinished().
+    scanner_->scan(dir);
 }
 
 void MainWindow::onScanFinished(DirScanResult res) {
@@ -928,14 +625,14 @@ void MainWindow::onScanFinished(DirScanResult res) {
     DBG(QStringLiteral("scan finished: dir=%1 rows=%2 ok=%3 broken=%4")
         .arg(res.dir).arg(res.rows.size()).arg(ok).arg(brokenCnt));
     model_->setRows(res.rows);
-    sortByModelColumn(model_->sortColumn(), model_->sortOrder());
+    cols_->sortByModelColumn(model_->sortColumn(), model_->sortOrder());
     // Restore the persisted header order and column widths of the file
     // table (spec 2.4): every directory scan resets the model, so apply
     // them here right after each scan instead of only once at startup.
     QTimer::singleShot(0, this, [this] {
-        applySavedColumnOrder();
-        loadColumnWidths();
-        applyTableColumnWidths();
+        cols_->applySavedColumnOrder();
+        cols_->loadColumnWidths();
+        cols_->applyTableColumnWidths();
     });
     // lazy prefetch of first N previews (spec 2.4)
     int n = std::min<int>(Settings::instance().previewPrefetchCount(), int(res.rows.size()));
@@ -948,60 +645,6 @@ void MainWindow::onScanFinished(DirScanResult res) {
     restorePendingSession();
 }
 
-// Sort the model by a *model* column id and keep the header indicator,
-// widths and the selected row in sync afterwards.
-void MainWindow::sortByModelColumn(int modelCol, Qt::SortOrder order) {
-    // Remember the selection by file path — sorting resets the model, so
-    // row indices are not stable across it.
-    QString selPath;
-    const int row = currentRow();
-    if (row >= 0 && row < model_->rows().size())
-        selPath = model_->rows()[row].path;
-
-    model_->sortByModelColumn(modelCol, order);
-    updateSortIndicator();
-    applyTableColumnWidths();
-
-    if (!selPath.isEmpty()) {
-        const auto &rows = model_->rows();
-        for (int i = 0; i < rows.size(); ++i) {
-            if (rows[i].path == selPath) {
-                table_->selectRow(i);
-                break;
-            }
-        }
-    }
-}
-
-// Map the current sort column back to its visual header section so the
-// indicator stays on the right column after drag-reordering.
-void MainWindow::updateSortIndicator() {
-    if (!table_ || !model_) return;
-    const int vis = model_->visibleColumns().indexOf(model_->sortColumn());
-    if (vis < 0) { table_->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder); return; }
-    table_->horizontalHeader()->setSortIndicator(
-        table_->horizontalHeader()->visualIndex(vis), model_->sortOrder());
-}
-
-// Set a comfortable width for every visible section, mapping the visual
-// section back to its model column via the header's logical index.
-void MainWindow::applyTableColumnWidths() {
-    static const int kColW[FileTableModel::ColCount] =
-        {220, 350, 70, 90, 90, 80, 90, 140, 130, 130};
-    if (!table_ || !model_) return;
-    for (int vis = 0; vis < model_->columnCount(); ++vis) {
-        int logical = table_->horizontalHeader()->logicalIndex(vis);
-        if (logical < 0) continue;
-        int modelCol = model_->visibleColumns().value(logical, -1);
-        if (modelCol >= 0 && modelCol < int(FileTableModel::ColCount)) {
-            // User-resized width wins over the built-in default (spec: sizes
-            // persist across restarts; stored in the SQLite session table).
-            const int w = colWidths_.value(modelCol, kColW[modelCol]);
-            if (table_->columnWidth(logical) != w)
-                table_->setColumnWidth(logical, w);
-        }
-    }
-}
 
 // ---------------- UI wiring for the playback engine ----------------
 
@@ -1176,239 +819,44 @@ void MainWindow::updateActiveFileDisplay() {
                                   : QStringLiteral("AudioScout - %1").arg(name));
 }
 
-// ---------------- playback ----------------
+// ---------------- playback (delegates to PlayerController) ----------------
 
-void MainWindow::playPause() {
-    playPauseInner();
-    // Single source of truth for the button label after every start/pause/
-    // resume path: whatever actually ended up running decides the text, so
-    // the button can never stay on "Play" while audio is playing (the old
-    // "blinks and stays Play" bug) nor on "Pause" after a failed start.
-    updatePlayButton();
+// PlayerUi implementation: the visible cursor. Programmatic moves set the
+// re-entrancy guard so AudioView::cursorMoved never mistakes them for a user
+// click-to-seek (that would loop back into PlayerController::seekPlaybackTo).
+void MainWindow::setPlayhead(qint64 frame, bool programmatic) {
+    if (!view_) return;
+    const bool prev = seekingPlayback_;
+    seekingPlayback_ = programmatic;
+    view_->setPlayheadFrame(frame);
+    seekingPlayback_ = prev;
 }
 
-void MainWindow::playPauseInner() {
-    if (!audio_.valid) return;
-    if (player_.isPlaying()) {          // in-process Qt sink is running
-        player_.pause();
-        playBtn_->setText(tr("Play"));
-        return;
-    }
-    if (player_.isPaused()) {           // resume Qt playback where we left off
-        player_.resume();
-        playBtn_->setText(tr("Pause"));
-        return;
-    }
-    if (playProc_) {                     // external fallback is running: pause it
-        qint64 cur = view_->playheadFrame();
-        stopFfmpegFallback();            // keeps fbStart/End/Loop, resets wasPlaying_
-        if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
-        seekingPlayback_ = true;         // programmatic move: no re-seek
-        view_->setPlayheadFrame(cur);    // resume point remembered by -ss below
-        seekingPlayback_ = false;
-        fbPaused_ = true;                // mark the session as paused-resumable
-        playBtn_->setText(tr("Play"));
-        return;
-    }
-    // Paused ffmpeg fallback: resume from the playhead position. The guard
-    // covers both branches below because start/stop of the fallback process
-    // moves the cursor programmatically — those echoes are not user clicks.
-    if (fbPaused_ && (fbStartFrame_ > 0 || fbEndFrame_ > 0)) {
-        seekingPlayback_ = true;
-        qint64 cur = view_->playheadFrame();
-        if (cur < fbStartFrame_ || cur >= fbEndFrame_) cur = fbStartFrame_;
-        fbPaused_ = false;
-        startFfmpegFallback(cur, fbEndFrame_, fbLooping_);
-        playBtn_->setText(playProc_ ? tr("Pause") : tr("Play"));
-        seekingPlayback_ = false;
-        if (!playProc_)
-            statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
-        return;
-    }
-
-    // After Stop: resume from where playback last started, not from the
-    // cursor/playhead. The user can jump to a new spot by clicking the
-    // waveform, or press W to go to the beginning of the file.
-    // Loop never invents its own repeat start: when armed, the session range
-    // is re-derived exactly like a fresh Play does — selection if any,
-    // otherwise the whole file.
-    // A selection always owns the playback range: with one present, every
-    // start/resume path below re-derives [selStart, selEnd) instead of using
-    // stale resume points. Without a selection the range is the whole file
-    // and playback begins at the visible cursor.
-    const bool loop = loopBtn_->isChecked();
-    const bool hasSel = view_->hasSelection();
-    const qint64 selStart = hasSel ? view_->selStart() : 0;
-    const qint64 selEnd   = hasSel ? view_->selEnd()   : audio_.totalFrames;
-
-    if (lastPlayStartFrame_ >= 0) {
-        qint64 start = lastPlayStartFrame_;
-        qint64 end   = audio_.totalFrames;
-        if (hasSel) {
-            start = selStart;         // selection wins over any old resume point
-            end   = selEnd;
-        } else if (loop) {
-            start = 0;                // loop without selection repeats the file
-        }
-        // Resume from the visible cursor when it sits inside the resume range
-        // (e.g. after a live seek during the previous session); otherwise the
-        // session simply starts at its recorded start point. The cursor and
-        // the audible position must never disagree.
-        const qint64 ph = view_->playheadFrame();
-        if (!hasSel && ph > start && ph < end) start = ph;
-        player_.play(start, end, loop);
-        if (player_.isPlaying()) {
-            lastPlayStartFrame_ = start;
-            playBtn_->setText(tr("Pause"));
-            QTimer::singleShot(250, this, [this, start, end, loop] {
-                if (player_.isPlaying() || playProc_) return;
-                DBG("Qt audio output failed instantly (resume), switching to ffmpeg fallback");
-                startFfmpegFallback(start, end, loop);
-                if (playProc_) {
-                    lastPlayStartFrame_ = start;
-                    playBtn_->setText(tr("Pause"));
-                } else {
-                    playBtn_->setText(tr("Play"));
-                    statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
-                }
-            });
-            return;
-        }
-        startFfmpegFallback(start, end, loop);
-        if (playProc_) {
-            lastPlayStartFrame_ = start;
-            playBtn_->setText(tr("Pause"));
-            return;
-        }
-        playBtn_->setText(tr("Play"));
-        lastPlayStartFrame_ = -1;   // no working output — fall through to normal start
-    }
-
-    qint64 start = hasSel ? selStart : view_->cursorFrame();
-    qint64 end = hasSel ? selEnd : audio_.totalFrames;
-    DBG(QStringLiteral("playPause: file=%1 frames=%2 rate=%3 ch=%4")
-        .arg(currentPath_).arg(audio_.totalFrames).arg(audio_.sampleRate).arg(audio_.channels));
-
-    // Preferred path: in-process playback via Qt Multimedia (QAudioSink with
-    // an ALSA/PulseAudio/PipeWire device, or the aplay/ffplay pipe fallback).
-    // If the sink dies right away (e.g. no plugin, device busy) we detect it
-    // after a short delay and transparently switch to the direct ffmpeg path
-    // so the button never just "blinks".
-    DBG(QStringLiteral("playPause: trying Qt sink, start=%1 end=%2 loop=%3 sel=%4")
-        .arg(start).arg(end).arg(loop).arg(view_->hasSelection()));
-    player_.play(start, end, loop);
-    lastPlayStartFrame_ = start;   // remember where this session began (Stop/Play resume point)
-    if (player_.isPlaying()) {
-        playBtn_->setText(tr("Pause"));
-        QTimer::singleShot(250, this, [this, start, end, loop] {
-            // Still running normally — nothing to do.
-            if (player_.isPlaying() || playProc_) return;
-            DBG("Qt audio output failed instantly, switching to ffmpeg fallback");
-            startFfmpegFallback(start, end, loop);
-            if (!playProc_)
-                statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
-        });
-        return;
-    }
-    // Sink unavailable outright — go straight to the direct ffmpeg fallback.
-    startFfmpegFallback(start, end, loop);
-    if (playProc_) {
-        playBtn_->setText(tr("Pause"));
-    } else {
-        DBG("ffmpeg fallback did not start — no audio output available");
-        statusBar()->showMessage(tr("No audio output available (check ALSA/PulseAudio/PipeWire or install ffmpeg)"), 5000);
-        playBtn_->setText(tr("Play"));
-    }
+qint64 MainWindow::playhead() const {
+    return view_ ? view_->playheadFrame() : 0;
 }
 
-void MainWindow::stopPlayback() {
-    // Qt session: Stop rewinds the cursor to where playback last started.
-    const qint64 qtResume = player_.isPlaying() || player_.isPaused()
-                                ? player_.startFrame() : -1;
-    // ffmpeg fallback: same rule — return to the session's start point.
-    const bool fbActive = playProc_ && wasPlaying_;
-    const qint64 fbResume = fbActive ? fbStartFrame_ : -1;
-
-    seekingPlayback_ = true;   // all cursor moves below are programmatic
-    player_.stop();
-    stopFfmpegFallback();
-    fbStartFrame_ = 0; fbEndFrame_ = 0;   // clear fallback resume state
-    fbPaused_ = false;                     // explicit Stop discards the paused session
-    playBtn_->setText(tr("Play"));
-    if (qtResume >= 0)
-        view_->setPlayheadFrame(qtResume);
-    else if (fbResume >= 0)
-        view_->setPlayheadFrame(fbResume);
-    else
-        view_->setPlayheadFrame(player_.currentFrame());
-    seekingPlayback_ = false;
+void MainWindow::showStatus(const QString &msg, int msec) {
+    statusBar()->showMessage(msg, msec);
 }
 
-// Seek to a frame while playback is active, in whichever output path runs.
-// Called from the waveform click handler (AudioView::cursorMoved).
-void MainWindow::seekPlaybackTo(qint64 frame) {
-    if (!audio_.valid) return;
-    // Re-entrancy guard: the playhead echoes below (setPlayheadFrame) and the
-    // process-restart path (stopFfmpegFallback rewinds the cursor to the
-    // session start) must not be re-interpreted as another user click.
-    seekingPlayback_ = true;
-    struct GuardReset { bool &g; ~GuardReset() { g = false; } } guardReset{seekingPlayback_};
-
-    // In-process playback (Qt QAudioSink pull mode or pipe push-mode pump):
-    // jump the position and keep playing/paused state as it is. The seek
-    // stays inside the session range — clicking past the end of a selection
-    // does NOT extend it: audio runs on from the click to the selection end
-    // and stops there, honouring the selection boundary.
-    if (player_.isPlaying() || player_.isPaused()) {
-        player_.seek(frame);
-        view_->setPlayheadFrame(player_.currentFrame());
-        return;
-    }
-
-    // External ffmpeg fallback process: restart it from the new position so
-    // playback continues there. A click inside the current range keeps the
-    // range (and loop) intact. A click *outside* it retargets only the
-    // *start* to the clicked frame; the end follows the selection rule —
-    // with a live selection playback still stops at the selection boundary,
-    // without one it runs to the end of the file.
-    if (playProc_ || (fbStartFrame_ > 0) || (fbEndFrame_ > 0)) {
-        const qint64 prevStart = fbStartFrame_, prevEnd = fbEndFrame_;
-        const bool prevLoop = fbLooping_;
-        const bool wasPausedSession = !playProc_;   // paused fallback, kept for resume
-        const bool hasSel = view_->hasSelection();
-        qint64 end = hasSel ? view_->selEnd() : audio_.totalFrames;
-        if (end <= frame) end = audio_.totalFrames; // clicked past the selection end
-        stopFfmpegFallback();             // kills the proc, clears resume state
-        startFfmpegFallback(frame, end, prevLoop);
-        if (playProc_) {
-            playBtn_->setText(tr("Pause"));
-            view_->setPlayheadFrame(frame);
-            lastPlayStartFrame_ = std::min(prevStart, frame); // Stop rewinds here
-        } else {
-            // Restart failed: restore the previous session state so Stop/Play
-            // bookkeeping stays consistent, and report.
-            fbStartFrame_ = prevStart; fbEndFrame_ = prevEnd; fbLooping_ = prevLoop;
-            fbPaused_ = wasPausedSession;
-            playBtn_->setText(tr("Play"));
-            statusBar()->showMessage(tr("Seek failed (external player could not restart)"), 4000);
-        }
-        return;
-    }
+void MainWindow::rangeChanged(qint64, qint64) {
+    // Informational only: the session range moved (loop retarget / seek).
 }
 
-// Keep the Play/Pause button in sync with the Qt sink state. The sink can
-// finish on its own (end of file, device error) while we believe it is
-// playing; without this the button would stay stuck on "Pause".
+// Keep the Play/Pause button and the Loop highlight in sync with what is
+// *actually* running. The Qt sink can finish on its own (end of file, device
+// error) while we believe it is playing; without this the button would stay
+// stuck on "Pause". The Loop button lights only when looping is armed AND
+// audible (Qt sink loop active or a running fallback session).
 void MainWindow::updatePlayButton() {
     if (!playBtn_) return;
-    const bool running = player_.isPlaying() || (playProc_ && wasPlaying_);
+    const bool running = pc_->isRunning();
     playBtn_->setText(running ? tr("Pause") : tr("Play"));
 
-    // Loop highlight follows *active* looping only: the button lights up when
-    // loop is armed AND a session is playing/paused (Qt sink, pipe pump or
-    // ffmpeg fallback). Checked-but-idle or un-checked states stay unlit.
     const bool active = loopBtn_->isChecked() &&
-                        (player_.isLoopActive() || (playProc_ && wasPlaying_));
+                        (player_.isLoopActive() ||
+                         (pc_->fallbackActive() && pc_->fallbackWasPlaying()));
     static bool firstLoopStyle = true;
     if (firstLoopStyle) {
         loopBtn_->setAutoFillBackground(true);
@@ -1420,212 +868,12 @@ void MainWindow::updatePlayButton() {
     loopBtn_->setPalette(pal);
 }
 
-// ---------------- ffmpeg direct-playback fallback ----------------
-//
-// On Ubuntu the Qt Multimedia stack may open a device (the ALSA/Pulse click
-// you hear) yet fail to actually stream our format, so QAudioSink stops
-// instantly. This fallback spawns an external player on a temp WAV copy of
-// the decoded buffer — the same path VLC uses successfully.
-
-void MainWindow::startFfmpegFallback(qint64 startFrame, qint64 endFrame, bool loop) {
-    // Programmatic session: the cursor moves inside (via stopFfmpegFallback
-    // and the playhead timer) must never be read as a user click-to-seek.
-    seekingPlayback_ = true;
-    struct GuardReset { bool &g; ~GuardReset() { g = false; } } guardReset{seekingPlayback_};
-    stopFfmpegFallback();
-    if (!audio_.valid || audio_.sampleRate <= 0) return;
-    fbPaused_ = false;   // a live session exists again
-    fbStartFrame_ = startFrame;
-    fbEndFrame_ = endFrame;
-    fbLooping_ = loop;
-
-    const double sr = audio_.sampleRate;
-    // Resume from the current playhead if it was moved past the start point.
-    qint64 fromFrame = std::max(startFrame, view_->playheadFrame());
-    if (fromFrame >= endFrame) fromFrame = startFrame;   // finished range -> restart
-    const double startSec = double(fromFrame) / sr;
-    const double durSec = double(endFrame - fromFrame) / sr;
-    if (durSec <= 0.001) return;
-
-    QString ff = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
-    if (ff.isEmpty()) {
-        DBG("ffmpeg executable not found (QStandardPaths::findExecutable failed) — cannot use playback fallback");
-        fbStartFrame_ = 0; fbEndFrame_ = 0;
-        return;
-    }
-
-    // For uncompressed formats on disk (WAV/AIFF/CAF) feed ffmpeg the ORIGINAL
-    // file directly: no temp copy, nothing written to disk. This matches what
-    // VLC does. Compressed sources (decoded into memory via ffmpeg) still need
-    // a temp WAV because the in-memory buffer may contain unsaved edits.
-    const bool directFile = !currentPath_.isEmpty() && QFile::exists(currentPath_)
-                            && isEditableFormat(currentPath_.toLower());
-    QString inputPath;
-    if (directFile) {
-        inputPath = currentPath_;
-    } else {
-        playTmpPath_ = QDir(QDir::tempPath())
-                          .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
-        QTemporaryFile tmp(playTmpPath_);
-        tmp.setAutoRemove(false);
-        if (!tmp.open()) { fbStartFrame_ = 0; fbEndFrame_ = 0; return; }
-        playTmpPath_ = tmp.fileName();
-        tmp.close();
-
-        AudioData copy = audio_;
-        QString err;
-        if (!AudioFile::save(playTmpPath_, copy, &err)) {
-            DBG(QStringLiteral("fallback temp WAV save failed: %1").arg(err));
-            QFile::remove(playTmpPath_);
-            playTmpPath_.clear();
-            fbStartFrame_ = 0; fbEndFrame_ = 0;
-            return;
-        }
-        inputPath = playTmpPath_;
-    }
-
-    playProc_ = new QProcess(this);
-    connect(playProc_, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this, [this](int code, QProcess::ExitStatus status) {
-                if (playProc_) { playProc_->deleteLater(); playProc_ = nullptr; }
-                if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
-                QFile::remove(playTmpPath_);
-                playTmpPath_.clear();
-                if (!wasPlaying_) return;      // stopped/paused intentionally
-                wasPlaying_ = false;
-                DBG(QStringLiteral("external player finished: exitCode=%1 status=%2")
-                    .arg(code).arg(status == QProcess::CrashExit ? "CrashExit" : "NormalExit"));
-                if (status == QProcess::CrashExit || code != 0) {
-                    statusBar()->showMessage(tr("Playback failed (external player error)"), 5000);
-                } else if (fbLooping_ && loopBtn_->isChecked()) {
-                    // Loop: restart the range when the clip ends. The button
-                    // check is re-read at this moment, so un-checking Loop
-                    // while the tail plays stops the session for good instead
-                    // of restarting it one more time.
-                    QTimer::singleShot(30, this, [this] {
-                        if (wasPlaying_) return;
-                        seekingPlayback_ = true;   // restart moves the cursor
-                        view_->setPlayheadFrame(fbStartFrame_);
-                        startFfmpegFallback(fbStartFrame_, fbEndFrame_, true);
-                        seekingPlayback_ = false;
-                    });
-                    return;
-                }
-                if (playBtn_) playBtn_->setText(tr("Play"));
-                updatePlayButton();   // fallback session over: sync Pause/Loop styling
-            });
-    // ffmpeg writes directly to the ALSA "default" device, which resolves to
-    // whatever output is configured in the system sound settings — no need to
-    // enumerate /proc/asound/cards or pick a card name manually.
-    QStringList args;
-    args << "-hide_banner" << "-nostdin" << "-loglevel" << "error" << "-re";
-    if (startSec > 0) args << "-ss" << QString::number(startSec, 'f', 3);
-    args << "-t" << QString::number(durSec, 'f', 3);
-    args << "-i" << inputPath << "-vn" << "-acodec" << "pcm_s16le"
-         << "-f" << "alsa" << "default";
-    DBG(QStringLiteral("spawning: %1 %2").arg(ff, args.join(' ')));
-    playProc_->setProgram(ff);
-    playProc_->setArguments(args);
-    // Capture ffmpeg stderr so ALSA errors end up in the debug log too.
-    playProc_->setProcessChannelMode(QProcess::SeparateChannels);
-    connect(playProc_, &QProcess::readyReadStandardError, this, [this] {
-        const QString s = QString::fromUtf8(playProc_->readAllStandardError()).trimmed();
-        if (!s.isEmpty()) {
-            // Keep it in the opt-in debug log only; don't spam the terminal.
-            DBG(QStringLiteral("ffmpeg stderr: %1").arg(s));
-        }
-    });
-    wasPlaying_ = true;
-    fbElapsedMs_ = 0;
-    fbFromFrame_ = fromFrame;
-    fbClock_.start();
-
-    // Advance the playhead in sync with real time while ffmpeg plays: the
-    // external process gives us no position feedback, so we track wall clock.
-    if (!fbPlayheadTimer_) {
-        fbPlayheadTimer_ = new QTimer(this);
-        fbPlayheadTimer_->setInterval(50);
-        connect(fbPlayheadTimer_, &QTimer::timeout, this, [this] {
-            if (!playProc_ || !wasPlaying_ || audio_.sampleRate <= 0) return;
-            const double sr = audio_.sampleRate;
-            qint64 elapsed = fbElapsedMs_ + (fbClock_.isValid() ? fbClock_.elapsed() : 0);
-            qint64 f = fbFromFrame_ + qint64(elapsed * sr / 1000.0);
-            if (f >= fbEndFrame_) {
-                // Process is about to finish on its own; clamp at range end.
-                view_->setPlayheadFrame(fbEndFrame_);
-                fbPlayheadTimer_->stop();
-                return;
-            }
-            view_->setPlayheadFrame(f);
-        });
-    }
-    fbPlayheadTimer_->start();
-
-    playProc_->start();
-    if (!playProc_->waitForStarted(3000)) {
-        DBG("failed to start ffmpeg playback process (waitForStarted timed out)");
-        if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
-        playProc_->disconnect(this);
-        playProc_->deleteLater();
-        playProc_ = nullptr;
-        wasPlaying_ = false;
-        QFile::remove(playTmpPath_);
-        playTmpPath_.clear();
-        fbStartFrame_ = 0; fbEndFrame_ = 0;
-    }
+// Click-to-seek during an active session: forwards to the controller, which
+// knows which output path (Qt sink vs ffmpeg fallback) is live.
+void MainWindow::seekPlaybackTo(qint64 frame) {
+    pc_->seekPlaybackTo(frame);
 }
 
-void MainWindow::resumeFfmpegFallback() {
-    startFfmpegFallback(fbStartFrame_, fbEndFrame_, fbLooping_);
-    if (playProc_) playBtn_->setText(tr("Pause"));
-}
-
-// Restart the running ffmpeg fallback at the current playhead position with
-// the freshly stored volume. ffmpeg has no live gain control, so the only way
-// to make the volume slider affect this output path is to relaunch the
-// process from where playback currently is, preserving range end and loop.
-void MainWindow::restartFfmpegFallbackWithVolume() {
-    if (!playProc_ || !wasPlaying_) return;
-    const bool loop = fbLooping_;
-    const qint64 end = fbEndFrame_;
-    qint64 cur = view_->playheadFrame();
-    if (cur < fbStartFrame_ || cur >= end) cur = fbStartFrame_;
-    stopFfmpegFallback();              // kills proc, clears resume state
-    startFfmpegFallback(cur, end, loop);
-    if (playProc_) {
-        playBtn_->setText(tr("Pause"));
-        view_->setPlayheadFrame(cur);
-    } else {
-        playBtn_->setText(tr("Play"));
-        statusBar()->showMessage(tr("Volume change failed (external player could not restart)"), 4000);
-    }
-}
-
-void MainWindow::stopFfmpegFallback() {
-    wasPlaying_ = false;
-    if (fbPlayheadTimer_) fbPlayheadTimer_->stop();
-    if (!playProc_) return;
-    fbElapsedMs_ += fbClock_.isValid() ? fbClock_.elapsed() : 0;
-    // Remember roughly where playback stopped so the next Play resumes there.
-    qint64 cur = view_->playheadFrame();
-    if (cur < fbStartFrame_ || cur >= fbEndFrame_) {
-        const double sr = audio_.sampleRate > 0 ? audio_.sampleRate : 1;
-        const double elapsed = fbElapsedMs_ / 1000.0;
-        cur = std::min(fbEndFrame_, fbStartFrame_ + qint64(elapsed * sr));
-    }
-    view_->setPlayheadFrame(cur);
-    playProc_->disconnect(this);
-    if (playProc_->state() != QProcess::NotRunning) {
-        playProc_->kill();
-        playProc_->waitForFinished(500);
-    }
-    playProc_->deleteLater();
-    playProc_ = nullptr;
-    if (!playTmpPath_.isEmpty()) {
-        QFile::remove(playTmpPath_);
-        playTmpPath_.clear();
-    }
-}
 
 void MainWindow::prevFile() {
     int row = currentRow();

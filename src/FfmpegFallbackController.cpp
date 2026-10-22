@@ -52,11 +52,12 @@ bool FfmpegFallbackController::start(qint64 startFrame, qint64 endFrame, bool lo
     // file directly: no temp copy, nothing written to disk. This matches what
     // VLC does. Compressed sources (decoded into memory via ffmpeg) still need
     // a temp WAV because the in-memory buffer may contain unsaved edits.
-    const bool directFile = !currentPath_.isEmpty() && QFile::exists(currentPath_)
-                            && isEditableFormat(currentPath_.toLower());
+    const QString curPath = currentPath();
+    const bool directFile = !curPath.isEmpty() && QFile::exists(curPath)
+                            && isEditableFormat(curPath.toLower());
     QString inputPath;
     if (directFile) {
-        inputPath = currentPath_;
+        inputPath = curPath;
     } else {
         tmpPath_ = QDir(QDir::tempPath())
                           .filePath(QStringLiteral("audioscout_play_XXXXXX.wav"));
@@ -93,7 +94,7 @@ bool FfmpegFallbackController::start(qint64 startFrame, qint64 endFrame, bool lo
                     if (onFinished_) onFinished_(true);
                     return;
                 }
-                if (looping_ && loopCheckedFn_ && loopCheckedFn()) {
+                if (looping_ && loopChecked()) {
                     // Loop: restart the range when the clip ends. The button
                     // check is re-read at this moment, so un-checking Loop
                     // while the tail plays stops the session for good instead

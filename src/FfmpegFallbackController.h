@@ -28,20 +28,23 @@ public:
     explicit FfmpegFallbackController(QObject *parent = nullptr);
     ~FfmpegFallbackController() override;
 
-    void setProviders(const AudioData *(*audio)(),
-                      qint64 (*playhead)(),
-                      void (*setPlayhead)(qint64),
-                      bool (*loopChecked)()) {
-        audioFn_ = audio;
-        playheadFn_ = playhead;
-        setPlayheadFn_ = setPlayhead;
-        loopCheckedFn_ = loopChecked;
+    void setProviders(std::function<const AudioData *()> audio,
+                      std::function<qint64()> playhead,
+                      std::function<void(qint64)> setPlayhead,
+                      std::function<bool()> loopChecked) {
+        audioFn_ = std::move(audio);
+        playheadFn_ = std::move(playhead);
+        setPlayheadFn_ = std::move(setPlayhead);
+        loopCheckedFn_ = std::move(loopChecked);
     }
     void setOnFinished(std::function<void(bool error)> cb) {
         onFinished_ = std::move(cb);
     }
     // The file currently loaded in the player (decides direct-file vs temp).
-    void setCurrentPath(const QString &p) { currentPath_ = p; }
+    void setCurrentPathProvider(std::function<QString()> fn) {
+        currentPathFn_ = std::move(fn);
+    }
+    QString currentPath() const { return currentPathFn_ ? currentPathFn_() : QString(); }
 
     bool isActive() const { return proc_ != nullptr; }
     bool wasPlaying() const { return wasPlaying_; }
@@ -72,21 +75,22 @@ public:
     bool restartWithVolume();
 
 private:
-    const AudioData *(*audioFn_)() = nullptr;
-    qint64 (*playheadFn_)() = nullptr;
-    void (*setPlayheadFn_)(qint64) = nullptr;
-    bool (*loopCheckedFn_)() = nullptr;
+    std::function<const AudioData *()> audioFn_;
+    std::function<qint64()> playheadFn_;
+    std::function<void(qint64)> setPlayheadFn_;
+    std::function<bool()> loopCheckedFn_;
+    std::function<QString()> currentPathFn_;
     std::function<void(bool error)> onFinished_;
 
     const AudioData *audio() const { return audioFn_ ? audioFn_() : nullptr; }
     qint64 playhead() const { return playheadFn_ ? playheadFn_() : 0; }
     void setPlayhead(qint64 f) { if (setPlayheadFn_) setPlayheadFn_(f); }
+    bool loopChecked() const { return loopCheckedFn_ ? loopCheckedFn_() : false; }
 
     QProcess *proc_ = nullptr;
     QTimer *playheadTimer_ = nullptr;
     QElapsedTimer clock_;
     QString tmpPath_;
-    QString currentPath_;
     qint64 startFrame_ = 0, endFrame_ = 0;
     qint64 fromFrame_ = 0;            // frame playback started from (this proc)
     qint64 elapsedMs_ = 0;            // wall-clock ms the proc ran (accumulated)
