@@ -1,0 +1,34 @@
+.TH AUDIOSCOUT 1 "October 22, 2026" "audioscout 1.0.0" "AudioScout"
+.SH NAME
+audioscout \- fast audio catalog listening and editing tool
+.SH SYNOPSIS
+.B audioscout
+.RI [ directory ]
+.SH DESCRIPTION
+AudioScout scans a directory tree for audio files (WAV, FLAC, MP3, OGG, AIFF,
+CAF) and presents them in a sortable table with waveform or spectrogram
+previews. It supports playback via bundled or external players, time markers,
+selection-based editing (mute, normalize, delete), undo/redo, and persistent
+session and column settings.
+.SH OPTIONS
+.TP
+.I directory
+Optional path to the audio directory to open at startup. If omitted, the last
+directory used in the previous session is restored from
+.B ~/.config/AudioScout/config.json
+and the SQLite database under
+.BR ~/.local/share/AudioScout/ .
+.SH FILES
+.TP
+.B ~/.config/AudioScout/config.json
+Application settings: hotkeys, preview modes, column order, visibility and widths.
+.TP
+.B ~/.local/share/AudioScout/audioscout.db
+SQLite database with markers, preview cache metadata and session state.
+.TP
+.B ~/.cache/AudioScout/previews/
+Generated PNG waveform/spectrogram previews.
+.SH BUGS
+Report bugs at <https://github.com/alex-kurochkin/audioscan/issues>.
+.SH AUTHOR
+Written by the AudioScout project.

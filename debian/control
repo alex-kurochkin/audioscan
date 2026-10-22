@@ -1,7 +1,7 @@
 Source: audioscout
 Section: sound
 Priority: optional
-Maintainer: AudioScout Developer <dev@audioscout.local>
+Maintainer: Alex Kurochkin <kurochkin.alex@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                cmake (>= 3.16),
                qt6-base-dev,

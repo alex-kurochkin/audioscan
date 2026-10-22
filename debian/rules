@@ -9,5 +9,11 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 override_dh_auto_configure:
 	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release
 
+override_dh_installdocs:
+	dh_installdocs
+	# Install the upstream man page (closes lintian no-manual-page).
+	install -m 644 -D debian/audioscout.1 debian/audioscout/usr/share/man/man1/audioscout.1
+	gzip -9nf debian/audioscout/usr/share/man/man1/audioscout.1
+
 override_dh_missing:
 	dh_missing --fail-missing
