@@ -96,6 +96,10 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
     paused_ = false;
     qtSinkMode_ = useQtSink;
 
+    // Let the output owner (e.g. an aplay pipe) apply the current volume to
+    // the already-running process before audio starts flowing through it.
+    if (volumeApplier_) volumeApplier_(volume_.load());
+
     if (useQtSink) {
         connect(sink_, &QAudioSink::stateChanged, this, [this](QAudio::State st) {
             if ((st == QAudio::StoppedState || st == QAudio::IdleState) && playing_) {
@@ -177,7 +181,7 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
         qint64 wantFrames = std::min(maxBytes / fbBytesPerFrame, framesAvail);
         if (wantFrames <= 0) return 0;
         const float *src = buf_ + posFrames_ * channels_;
-        const double v = volume_;
+        const double v = volume_.load();
         if (i16) {
             int16_t *dst = reinterpret_cast<int16_t *>(out);
             for (qint64 i = 0; i < wantFrames * channels_; ++i) {
@@ -215,7 +219,7 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
     if (wantFrames <= 0) return 0;
 
     const float *src = buf_ + posFrames_ * channels_;
-    const double v = volume_;
+    const double v = volume_.load();
 
     // If the sink was configured for Int16 output (device doesn't support
     // float), convert on the fly.

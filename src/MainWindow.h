@@ -86,8 +86,8 @@ private:
     QComboBox *tableModeCombo_ = nullptr;
     AudioView *view_ = nullptr;
     QPushButton *playBtn_ = nullptr, *loopBtn_ = nullptr;
+    QToolButton *displayToggleBtn_ = nullptr;   // Waveform/Spectrogram toggle
     QSlider *volumeSlider_ = nullptr;
-    QComboBox *playerModeCombo_ = nullptr;
     QDoubleSpinBox *normLevel_ = nullptr;
     QAction *actRefreshPrev_ = nullptr, *actZoomIn_ = nullptr, *actZoomOut_ = nullptr;
     QAction *actSettings_ = nullptr;
@@ -104,6 +104,10 @@ private:
     // playback always works. playProc_ owns the temp file path.
     QProcess *playProc_ = nullptr;
     QString playTmpPath_;
+    // The in-process pipe sink currently owned by AudioPlayer (aplay/ffplay).
+    // Kept here so the volume slider can respawn aplay with a new -v value.
+    class ProcessSink *pipeSink_ = nullptr;   // defined in MainWindow.cpp
+    QAudioFormat pipeFmt_;
     // Current fallback range in frames (for pause/resume and loop restart).
     qint64 fbStartFrame_ = 0, fbEndFrame_ = 0;
     bool fbLooping_ = false;

@@ -78,6 +78,15 @@ public:
         : QIODevice(parent), program_(program), args_(args) {}
     ~ProcessSink() override { shutdown(); }
 
+    // Restart the child process with an updated argument list while keeping
+    // the same object identity (AudioPlayer deletes this device only when it
+    // replaces it). Used for live volume changes on "aplay", whose -volume is
+    // fixed at spawn time. The next writeData() respawns lazily with newArgs.
+    void restartWithArgs(const QStringList &newArgs) {
+        args_ = newArgs;
+        shutdown();
+    }
+
 protected:
     qint64 readData(char *, qint64) override { return 0; }
     qint64 writeData(const char *data, qint64 len) override {
@@ -124,7 +133,7 @@ private:
     QProcess *proc_ = nullptr;
 };
 
-static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
+static QStringList aplayArgsFor(const QAudioFormat &fmt, double volume) {
     auto tag = [](QAudioFormat::SampleFormat sf) -> QString {
         switch (sf) {
         case QAudioFormat::Int16: return QStringLiteral("S16_LE");
@@ -139,7 +148,17 @@ static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
          << "-c" << QString::number(fmt.channelCount())
          << "-r" << QString::number(fmt.sampleRate())
          << "-f" << tag(fmt.sampleFormat());
-    auto *s = new ProcessSink(QStringLiteral("aplay"), args, parent);
+    // aplay applies its own hardware-independent gain; the in-process float
+    // path multiplies by volume_ directly, so do the same here. 0 dB = full
+    // scale; anything above 0 dB clips, so clamp to it.
+    const double db = volume >= 0.999 ? 0.0
+                     : 20.0 * std::log10(std::max(volume, 0.0005));
+    args << "-v" << QString::number(db, 'f', 1);
+    return args;
+}
+
+static QIODevice *makeAplaySink(const QAudioFormat &fmt, QObject *parent) {
+    auto *s = new ProcessSink(QStringLiteral("aplay"), aplayArgsFor(fmt, 1.0), parent);
     s->open(QIODevice::WriteOnly | QIODevice::Unbuffered);
     return s;
 }

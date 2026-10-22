@@ -4,9 +4,9 @@
 #include <QObject>
 #include <QIODevice>
 #include <QTimer>
+#include <atomic>
 #include <cstdint>
 #include <functional>
-
 // Playback of an interleaved float PCM buffer via Qt Multimedia (QAudioSink).
 // Supports volume gain, loop of a frame range, and start/end range playback.
 class AudioPlayer : public QObject {
@@ -39,12 +39,22 @@ public:
     bool isPlaying() const { return playing_; }
     bool isPaused() const { return paused_; }
 
-    void setVolume(double v) { volume_ = v; }        // internal gain 0..1
-    double volume() const { return volume_; }
+    // Volume is read by the audio callback thread, so it must be atomic.
+    void setVolume(double v) { volume_.store(v); }   // internal gain 0..1
+    double volume() const { return volume_.load(); }
+    // Live volume changes must be applied to the already-created output
+    // device too: aplay reads its own -volume argument at startup, so the
+    // process has to be respawned with the new value.
+    using VolumeApplier = std::function<void(double)>;
+    void setVolumeApplier(VolumeApplier f) { volumeApplier_ = std::move(f); }
 
     // Toggle loop of the current playback range live (while playing).
     void setLooping(bool on) { looping_ = on; }
     bool isLooping() const { return looping_; }
+    // Loop state that actually drives audible repetition right now: true only
+    // while a session is active AND looping is armed. The UI uses this to
+    // decide whether the Loop button should look highlighted.
+    bool isLoopActive() const { return looping_ && (playing_ || paused_); }
 
     qint64 currentFrame() const { return posFrames_; }
     qint64 startFrame() const { return startFrames_; }
@@ -76,6 +86,7 @@ private:
     QAudioSink *sink_ = nullptr;
     FloatPcmDevice *device_ = nullptr;
     SinkFactory sinkFactory_;
+    VolumeApplier volumeApplier_;
 
     // External-player fallback (aplay/ffplay pipe): push-mode pump.
     QIODevice *outDevice_ = nullptr;
@@ -93,5 +104,5 @@ private:
     bool playing_ = false;
     bool paused_ = false;        // paused mid-playback, resumable from posFrames_
     bool qtSinkMode_ = false;    // true: QAudioSink pull mode; false: timer pump
-    double volume_ = 0.8;
+    std::atomic<double> volume_{0.8};
 };
