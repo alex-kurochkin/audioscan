@@ -346,11 +346,14 @@ void MainWindow::buildUi() {
     columnsBtn_->setPopupMode(QToolButton::InstantPopup);
     tb->addWidget(columnsBtn_);
 
-    tableModeCombo_ = new QComboBox(tb);
-    tableModeCombo_->addItems({tr("Wave preview"), tr("Spectrogram preview")});
-    tableModeCombo_->setCurrentIndex(Settings::instance().tablePreviewMode() == QLatin1String("spectrogram") ? 1 : 0);
+    // Single toggle button instead of a dropdown: shows the mode it will switch TO.
+    tableModeBtn_ = new QToolButton(tb);
+    const bool tableSpec = Settings::instance().tablePreviewMode() == QLatin1String("spectrogram");
+    tableModeBtn_->setText(tableSpec ? tr("Spectrogram") : tr("Waveform"));
+    tableModeBtn_->setToolTip(tr("Click to switch table previews between Waveform and Spectrogram"));
+    tableModeBtn_->setAutoRaise(false);
     tb->addWidget(new QLabel(tr(" Table: "), tb));
-    tb->addWidget(tableModeCombo_);
+    tb->addWidget(tableModeBtn_);
 
     actRefreshPrev_ = new QAction(tr("Refresh previews"), tb);
     tb->addAction(actRefreshPrev_);
@@ -364,9 +367,12 @@ void MainWindow::buildUi() {
     connect(actZoomIn_, &QAction::triggered, this, &MainWindow::zoomInPlayer);
     connect(actZoomOut_, &QAction::triggered, this, &MainWindow::zoomOutPlayer);
     connect(actSettings_, &QAction::triggered, this, &MainWindow::showSettings);
-    connect(tableModeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int idx) {
-        Settings::instance().setTablePreviewMode(idx == 1 ? QStringLiteral("spectrogram")
-                                                          : QStringLiteral("wave"));
+    connect(tableModeBtn_, &QToolButton::clicked, this, [this] {
+        const bool toSpectrogram =
+            Settings::instance().tablePreviewMode() != QLatin1String("spectrogram");
+        Settings::instance().setTablePreviewMode(toSpectrogram ? QStringLiteral("spectrogram")
+                                                               : QStringLiteral("wave"));
+        tableModeBtn_->setText(toSpectrogram ? tr("Spectrogram") : tr("Waveform"));
         refreshPreviewsForDir();
     });
 
@@ -2026,5 +2032,6 @@ void MainWindow::showSettings() {
     connect(&dlg, &SettingsDialog::hotkeysChanged, this, &MainWindow::applyHotkeys);
     dlg.exec();
     view_->setMode(Settings::instance().playerMode());
-    tableModeCombo_->setCurrentIndex(Settings::instance().tablePreviewMode() == QLatin1String("spectrogram") ? 1 : 0);
+    tableModeBtn_->setText(Settings::instance().tablePreviewMode() == QLatin1String("spectrogram")
+                               ? tr("Spectrogram") : tr("Waveform"));
 }

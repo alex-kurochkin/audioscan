@@ -4,7 +4,7 @@
 #include <QTableView>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QComboBox>
+
 #include <QSlider>
 #include <QDoubleSpinBox>
 #include <QFileSystemModel>
@@ -101,7 +101,7 @@ private:
     QTableView *table_ = nullptr;
     QLineEdit *searchEdit_ = nullptr;
     QToolButton *columnsBtn_ = nullptr;
-    QComboBox *tableModeCombo_ = nullptr;
+    QToolButton *tableModeBtn_ = nullptr;       // Waveform/Spectrogram toggle for table previews
     AudioView *view_ = nullptr;
     QPushButton *playBtn_ = nullptr, *loopBtn_ = nullptr;
     QLabel *activeFileLabel_ = nullptr;         // shows the active file on the action bar
