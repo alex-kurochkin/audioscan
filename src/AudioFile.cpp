@@ -16,6 +16,21 @@
 #include <taglib/tpropertymap.h>
 #include <cmath>
 
+// Map a libsndfile sample subtype back to its SF_FORMAT_* constant so save()
+// can write the file in the SAME PCM/float subformat as the source instead of
+// silently converting everything to Float32.
+static int sfSubformatFromSampleFormat(SampleFormat f) {
+    switch (f) {
+        case SampleFormat::UInt8:   return SF_FORMAT_PCM_S8;
+        case SampleFormat::Int16:   return SF_FORMAT_PCM_16;
+        case SampleFormat::Int24:   return SF_FORMAT_PCM_24;
+        case SampleFormat::Int32:   return SF_FORMAT_PCM_32;
+        case SampleFormat::Float32: return SF_FORMAT_FLOAT;
+        case SampleFormat::Float64: return SF_FORMAT_DOUBLE;
+        default:                    return 0;   // unknown/compressed -> caller picks a default
+    }
+}
+
 static SampleFormat sfToFormat(int format) {
     int sub = format & SF_FORMAT_SUBMASK;
     switch (sub) {
@@ -151,14 +166,20 @@ bool AudioFile::decodeWithFfmpeg(const QString &path, QString &tempOut, QString 
         if (err) *err = QStringLiteral("Cannot create temp dir");
         return false;
     }
-    QString outPath = tmpDir.filePath(QStringLiteral("dec_%1.wav")
-                    .arg(qHash(QFileInfo(path).absoluteFilePath()), 8, 16, QLatin1Char('0')));
+    const QFileInfo srcFi(path);
+    // Cache key includes mtime+size so a changed source file is re-decoded.
+    QString outPath = tmpDir.filePath(QStringLiteral("dec_%1_%2_%3.wav")
+                    .arg(qHash(srcFi.absoluteFilePath()), 8, 16, QLatin1Char('0'))
+                    .arg(srcFi.lastModified().toMSecsSinceEpoch())
+                    .arg(srcFi.size()));
     if (QFileInfo::exists(outPath)) { tempOut = outPath; return true; } // cached decode
 
     QProcess p;
     p.setProgram(QStringLiteral("ffmpeg"));
+    // Keep the ORIGINAL sample rate: forcing -ar 44100 would silently resample
+    // material recorded at other rates and desync markers/playhead positions.
     p.setArguments({"-y", "-loglevel", "error", "-i", path,
-                    "-acodec", "pcm_f32le", "-ar", "44100", outPath});
+                    "-acodec", "pcm_f32le", outPath});
     p.start();
     if (!p.waitForStarted(5000)) {
         if (err) *err = QStringLiteral("Failed to start ffmpeg (is it installed?)");
@@ -182,6 +203,7 @@ static bool loadViaSndfile(const QString &path, AudioData &out, QString *err) {
     out.channels = info.channels;
     out.totalFrames = info.frames;
     out.format = sfToFormat(info.format);
+    out.container = info.format & SF_FORMAT_CONTAINERMASK;
     const char *cmt = sf_get_string(sf, SF_STR_COMMENT);
     if (cmt) out.comment = QString::fromUtf8(cmt);
     out.samples.resize(out.totalFrames * out.channels);
@@ -213,11 +235,17 @@ bool AudioFile::save(const QString &path, const AudioData &data, QString *err) {
         return false;
     }
     QString lower = path.toLower();
-    int format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+    int container = SF_FORMAT_WAV;
     if (lower.endsWith(QLatin1String(".aif")) || lower.endsWith(QLatin1String(".aiff")))
-        format = SF_FORMAT_AIFF | SF_FORMAT_FLOAT;
+        container = SF_FORMAT_AIFF;
     else if (lower.endsWith(QLatin1String(".caf")))
-        format = SF_FORMAT_CAF | SF_FORMAT_FLOAT;
+        container = SF_FORMAT_CAF;
+    // Preserve the source subformat (e.g. PCM-16 stays PCM-16) so editing a
+    // file does not silently convert it to Float32. Fall back to Float32 for
+    // unknown/compressed sources that were decoded via ffmpeg.
+    int sub = sfSubformatFromSampleFormat(data.format);
+    if (sub == 0) sub = SF_FORMAT_FLOAT;
+    int format = container | sub;
 
     SF_INFO info{};
     info.samplerate = data.sampleRate;

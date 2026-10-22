@@ -46,8 +46,11 @@ inline bool isEditableFormat(const QString &pathLower) {
 }
 
 inline bool isAudioFile(const QString &pathLower) {
+    // Container/codec extensions that actually carry audio streams playable by
+    // the app (libsndfile native + ffmpeg-decodable). ".mp4" alone is usually a
+    // video container and ".aiffc" is not a real extension — both removed.
     static const char *exts[] = {".wav",".aiff",".aif",".caf",".flac",".mp3",".ogg",".oga",
-                                 ".m4a",".aac",".wma",".opus",".wv",".au",".aiffc",".mp2",".mp4"};
+                                 ".m4a",".aac",".wma",".opus",".wv",".au",".mp2"};
     for (const char *e : exts)
         if (pathLower.endsWith(QLatin1String(e))) return true;
     return false;

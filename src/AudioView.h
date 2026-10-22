@@ -40,6 +40,7 @@ signals:
     void markerDoubleClickedEmpty(qint64 frame, bool ctrl);   // create marker request
     void doubleClickBetweenMarkers(qint64 a, qint64 b);       // select segment
     void markerClicked(int index);
+    void markerDoubleClicked(int index);                       // open editor dialog
     void markerMoved(int index, qint64 newFrame);
     void cursorMoved(qint64 frame);
     void editActionRequested(const QString &action);          // e.g. delete-marker handled by main
@@ -77,4 +78,8 @@ private:
     int dragStartX_ = 0;
     int dragMarkerIdx_ = -1;
     bool sampleLevel_ = false;  // zoomed to individual samples
+    // double-click-on-marker detection (press handler): index + timestamp of
+    // the previous press that hit a marker, reset when any other area is hit.
+    qint64 dblPressMs_ = 0;
+    int dblPressIdx_ = -1;
 };

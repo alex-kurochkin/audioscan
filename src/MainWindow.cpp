@@ -1549,12 +1549,36 @@ void MainWindow::applyEditToRange(std::function<void()> op, const QString &type,
         QMessageBox::warning(this, tr("Undo error"), err);
         return;
     }
+    // Remember the normalize target level so redo() re-applies the SAME gain
+    // even if the user changes the spinbox in between.
+    if (type == QLatin1String("normalize"))
+        rec.normalizeDbfs = normLevel_->value();
     op();
     // Save FIRST: only if the file was actually written do we record the undo
     // entry. Otherwise a failed save would leave history/buffer in conflict
     // with the disk (undo would restore samples that were never persisted).
     if (!AudioFile::save(currentPath_, audio_, &err)) {
         QFile::remove(rec.samplesFile);   // drop the orphaned sample dump
+        // Roll the in-memory buffer back to its pre-edit state so it stays in
+        // sync with the untouched file on disk; otherwise subsequent edits or
+        // an accidental later save would persist changes the user believes
+        // failed, and undo/redo would operate on phantom data.
+        std::vector<float> orig;
+        QString rerr;
+        if (UndoStack::readOriginalSamples(rec.samplesFile, orig, &rerr) &&
+            qint64(orig.size()) == len * audio_.channels) {
+            std::copy(orig.begin(), orig.end(),
+                      std::next(audio_.samples.begin(), off * audio_.channels));
+        } else {
+            // Cannot roll back reliably — reload the file from disk instead.
+            AudioData fresh;
+            if (AudioFile::load(currentPath_, fresh, nullptr) && fresh.valid)
+                audio_ = fresh;
+        }
+        player_.setBuffer(audio_.samples.data(), audio_.totalFrames,
+                          audio_.channels, audio_.sampleRate);
+        view_->setData(&audio_);
+        view_->update();
         QMessageBox::warning(this, tr("Save failed"), err);
         return;
     }
@@ -1724,7 +1748,9 @@ void MainWindow::redo() {
         std::fill(audio_.samples.begin() + rec->offset * ch,
                   audio_.samples.begin() + (rec->offset + rec->length) * ch, 0.0f);
     } else if (rec->type == QLatin1String("normalize")) {
-        double dbfs = normLevel_->value();
+        // Re-apply the gain with the target level captured when the operation
+        // was performed — not whatever the spinbox shows now.
+        const double dbfs = rec->normalizeDbfs;
         float target = float(std::pow(10.0, dbfs / 20.0));
         float peak = 0.f;
         for (qint64 i = rec->offset * ch; i < (rec->offset + rec->length) * ch; ++i)
@@ -1776,16 +1802,16 @@ void MainWindow::createMarkerAt(qint64 frame) {
 }
 
 void MainWindow::onMarkerClicked(int idx) {
+    // Single click only highlights the marker. The editor dialog is opened
+    // through AudioView::markerDoubleClicked (reliable double-click detection
+    // inside the view's press handler), connected below.
     if (idx < 0 || idx >= markers_.size()) return;
     view_->setActiveMarkerIndex(idx);
-    // Double click on a marker opens the editor popup (spec 4.2).
-    static qint64 lastClickMs = 0;
-    static int lastIdx = -1;
-    qint64 now = QDateTime::currentMSecsSinceEpoch();
-    bool dbl = (idx == lastIdx && now - lastClickMs < QApplication::doubleClickInterval());
-    lastClickMs = now; lastIdx = idx;
-    if (!dbl) return;
+}
 
+void MainWindow::openMarkerEditor(int idx) {
+    if (idx < 0 || idx >= markers_.size()) return;
+    view_->setActiveMarkerIndex(idx);
     Marker copy = markers_[idx];
     MarkerDialog dlg(copy, audio_.sampleRate, this);
     dlg.exec();

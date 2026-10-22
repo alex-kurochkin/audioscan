@@ -8,6 +8,7 @@ struct AudioData {
     int sampleRate = 44100;
     int channels = 2;
     SampleFormat format = SampleFormat::Float32;
+    int container = 0x010000;   // libsndfile container (SF_FORMAT_WAV/-AIFF/-CAF) of the source file
     qint64 totalFrames = 0;
     std::vector<float> samples;      // interleaved
     QString comment;             // ICMT / Vorbis comment / TagLib comment

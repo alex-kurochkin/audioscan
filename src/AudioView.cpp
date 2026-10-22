@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QScrollBar>
 #include <QDateTime>
+#include <QApplication>
 #include <algorithm>
 #include <cmath>
 
@@ -249,13 +250,32 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
     }
     int mi = markerIndexAt(markers_, this, x);
     if (mi >= 0) {
+        // Qt delivers press + release BEFORE the double-click event, so a plain
+        // click on a marker starts a (possibly zero-distance) MoveMarker drag
+        // here. Detect the second consecutive stationary click on the SAME
+        // marker directly in the press handler: that is exactly when Qt also
+        // sends mouseDoubleClickEvent, so we open the editor once — without
+        // relying on fragile timestamp emulation in MainWindow.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const bool secondClick =
+            (e->button() == Qt::LeftButton &&
+             dblPressIdx_ == mi && now - dblPressMs_ < QApplication::doubleClickInterval());
+        dblPressMs_ = now; dblPressIdx_ = mi;
         activeMarker_ = mi;
         emit markerClicked(mi);
+        if (secondClick) {          // paired with mouseDoubleClickEvent below
+            drag_ = NoDrag;
+            emit markerDoubleClicked(mi);   // main window opens editor dialog
+            update();
+            return;
+        }
         drag_ = MoveMarker;
         dragMarkerIdx_ = mi;
+        dragStartX_ = x;
         update();
         return;
     }
+    dblPressMs_ = 0; dblPressIdx_ = -1;
     if (e->button() == Qt::LeftButton) {
         drag_ = NewSelection;
         dragStartX_ = x;
@@ -348,7 +368,8 @@ void AudioView::mouseDoubleClickEvent(QMouseEvent *e) {
     bool ctrl = e->modifiers().testFlag(Qt::ControlModifier);
     int mi = markerIndexAt(markers_, this, x);
     if (mi >= 0) {
-        emit markerClicked(mi);   // main window opens editor dialog
+        // Editor dialog opening is handled via the markerDoubleClicked signal
+        // emitted from mousePressEvent (Qt sends press before double-click).
         return;
     }
     if (ctrl) {

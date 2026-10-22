@@ -13,6 +13,7 @@ struct UndoRecord {
     qint64 offset = 0;         // frame offset of affected range
     qint64 length = 0;         // frames in affected range (before op)
     qint64 newLength = 0;      // frames after op (for delete: length - removed)
+    double normalizeDbfs = 0;  // target level captured at operation time (redo uses this, not the current spinbox)
     QString samplesFile;       // path to raw float32 original data (interleaved)
     int channels = 0;
     // marker bookkeeping for delete ops
