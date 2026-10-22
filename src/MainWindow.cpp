@@ -238,8 +238,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 // Apply the pending file selection/position after a directory scan finished.
 void MainWindow::restorePendingSession() {
     if (pendingSessionFile_.isEmpty()) return;
-    const int row = model_->rows().indexOf(
-        [this](const FileTableModel::Row &r) { return r.path == pendingSessionFile_; });
+    int row = -1;
+    const auto &rows = model_->rows();
+    for (int i = 0; i < rows.size(); ++i) {
+        if (rows[i].path == pendingSessionFile_) { row = i; break; }
+    }
     if (row < 0 || model_->rows()[row].broken) {   // file gone or broken: drop it
         pendingSessionFile_.clear();
         return;
