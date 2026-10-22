@@ -2,6 +2,7 @@
 #include "AudioPlayer.h"
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <algorithm>
 #include <cmath>
 
