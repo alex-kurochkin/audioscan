@@ -6,7 +6,6 @@
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QHeader>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonObject>

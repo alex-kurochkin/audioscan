@@ -140,7 +140,7 @@ bool FfmpegFallbackController::start(qint64 startFrame, qint64 endFrame, bool lo
         playheadTimer_ = new QTimer(this);
         playheadTimer_->setInterval(50);
         connect(playheadTimer_, &QTimer::timeout, this, [this] {
-            const AudioData *a = audio();
+            const AudioData *a = this->audio();
             if (!proc_ || !wasPlaying_ || !a || a->sampleRate <= 0) return;
             const double sr = a->sampleRate;
             qint64 elapsed = elapsedMs_ + (clock_.isValid() ? clock_.elapsed() : 0);

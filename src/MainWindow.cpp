@@ -35,6 +35,9 @@
 #include "FfmpegFallbackController.h"
 #include "PlayerController.h"
 #include "ProcessSink.h"
+#include "AudioDebug.h"
+
+#include <QStandardPaths>
 
 #include <QVBoxLayout>
 #include <QMediaDevices>
@@ -764,9 +767,9 @@ void MainWindow::onRowDoubleClicked() {
     int row = currentRow();
     if (row >= 0 && row < model_->rows().size()) {
         const QString &newPath = model_->rows()[row].path;
-        if (player_.isPlaying() || playProc_ || newPath != currentPath_) {
+        if (player_.isPlaying() || fb_->isActive() || newPath != currentPath_) {
             player_.stop();
-            stopFfmpegFallback();
+            fb_->stop();
             playBtn_->setText(tr("Play"));
         }
     }
@@ -786,7 +789,7 @@ void MainWindow::loadCurrentFile() {
     }
     QString err;
     player_.stop();
-    lastPlayStartFrame_ = -1;   // per-file resume point resets on (re)load
+    pc_->setLastPlayStartFrame(-1);   // per-file resume point resets on (re)load
     if (!AudioFile::load(r.path, audio_, &err)) {
         QMessageBox::warning(this, tr("Load failed"),
                              tr("Cannot open %1\n%2").arg(r.name, err));
@@ -878,9 +881,9 @@ void MainWindow::seekPlaybackTo(qint64 frame) {
 void MainWindow::prevFile() {
     int row = currentRow();
     if (row > 0) {
-        if (player_.isPlaying() || playProc_) {
+        if (player_.isPlaying() || fb_->isActive()) {
             player_.stop();
-            stopFfmpegFallback();
+            fb_->stop();
             playBtn_->setText(tr("Play"));
         }
         table_->selectRow(row - 1);
@@ -896,16 +899,16 @@ void MainWindow::prevFile() {
 void MainWindow::nextFile() {
     int row = currentRow();
     if (row >= 0 && row + 1 < model_->rows().size()) {
-        if (player_.isPlaying() || playProc_) {
+        if (player_.isPlaying() || fb_->isActive()) {
             player_.stop();
-            stopFfmpegFallback();
+            fb_->stop();
             playBtn_->setText(tr("Play"));
         }
         table_->selectRow(row + 1);
         table_->scrollTo(model_->index(row + 1, 0));
         loadCurrentFile();   // prev/next load the file immediately
     } else {
-        stopPlayback();   // end of list -> stop (spec 2.6)
+        pc_->stopPlayback();   // end of list -> stop (spec 2.6)
     }
 }
 

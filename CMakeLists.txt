@@ -24,6 +24,11 @@ add_executable(audioscout
     src/UndoStack.cpp
     src/MarkerDialog.cpp
     src/SettingsDialog.cpp
+    src/DirScanner.cpp
+    src/FfmpegFallbackController.cpp
+    src/PlayerController.cpp
+    src/ColumnLayoutController.cpp
+    src/ProcessSink.cpp
 )
 
 target_include_directories(audioscout PRIVATE
