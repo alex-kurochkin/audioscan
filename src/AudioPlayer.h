@@ -117,24 +117,36 @@ private:
     QIODevice *outDevice_ = nullptr;
     QAudioFormat outFmt_;
     QTimer *pump_ = nullptr;
-    QByteArray pumpBuf_;
+    QByteArray pumpBuf_;           // bytes accepted by write() but not yet drained
+    qint64 sinkQueuedFrames_ = 0;  // frames sitting in the output channel:
+                                   // pumpBuf_ + everything handed to ProcessSink
+                                   // (its stdin pipe + ALSA ring) that aplay has
+                                   // not played yet. The pacing cap and the
+                                   // audible-end bookkeeping both use this value.
     qint64 pumpBytesPerTick_ = 0;
     qint64 pumpFrameBytes_ = 0;
     int pumpPeriodMs_ = 20;
-    // Wall-clock pacing for the push pump: the cursor must advance in step
-    // with real time, not with how many bytes the OS timer happened to fire
-    // for. A fixed "one period per tick" pump runs fast during the child's
-    // startup window (the sink accepts everything instantly, so every tick
-    // advances a full period while nothing audible has been consumed yet)
-    // and then slows to the drain rate — exactly the "cursor races, then
-    // crawls, always ahead of the sound" symptom. We instead track how much
-    // audio has actually been accepted by the sink vs. how much wall time
-    // has passed since playback started, and only generate what is due.
-    QElapsedTimer playClock_;      // monotonic session clock (started on play/resume)
+    // Sink-capacity pacing for the push pump. The cursor must follow the
+    // AUDIBLE position, which trails the generated position by however much
+    // PCM is currently sitting in the output channel (aplay's stdin pipe +
+    // its ALSA ring buffer). A pure wall-clock pump ignores that reservoir:
+    // at start the whole channel depth gets filled "on credit" within the
+    // first few ticks (cursor sprints, then crawls, permanently ahead of the
+    // sound by up to ~0.7 s), and empty timer ticks make it stutter. Instead
+    // we cap the unplayed backlog at the channel capacity: generate one
+    // period per tick ONLY while the backlog is below capacity, and idle
+    // otherwise. Then the audible position equals posFrames_ minus a bounded
+    // constant delay, the cursor never sprints, and seeks/pauses can drop
+    // the backlog deterministically.
+    QElapsedTimer playClock_;      // monotonic session clock (diagnostics/idle guard)
     qint64 clockBaseMs_ = 0;       // ms accumulated before the current run segment
     qint64 framesFed_ = 0;         // total frames handed to the sink this session
     qint64 lastPumpUsec_ = 0;      // previous pump tick (µs on playClock_)
     double pumpRateFramesPerUsec_ = 0.0;  // sampleRate / 1000
+    qint64 pumpMaxBacklogFrames_ = 0;     // channel capacity in frames (pacing cap)
+    bool endPending_ = false;             // range generated, waiting for the
+                                          // audible tail to drain before
+                                          // declaring finished()
 
     // Frame where the most recent play session started; used by MainWindow
     // so that pressing Play after Stop resumes from that point.

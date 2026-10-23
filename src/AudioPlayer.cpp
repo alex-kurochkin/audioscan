@@ -269,15 +269,17 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
         });
         sink_->start(device_);
     } else {
-        // Realtime pacing: feed the sink in wall-clock steps (see
-        // generateBytes()). Start the monotonic session clock at the moment
-        // audio begins flowing; framesFed_ counts total audio handed to the
-        // sink so seek() can re-anchor the clock to the audible position.
+        // Sink-capacity pacing (see pumpMaxBacklogFrames_ in the header):
+        // generate at most one period per tick and never let the unplayed
+        // backlog exceed the output channel. Start the monotonic session
+        // clock for diagnostics/idle guarding; framesFed_ counts total audio
+        // handed to the sink this session.
         if (!pump_) {
             pump_ = new QTimer(this);
             connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
         }
         pumpBuf_.clear();
+        sinkQueuedFrames_ = 0;
         const qint64 periodBytes = qint64(sampleRate_ / 50) * channels_ * qint64(sizeof(float));
         pumpPeriodMs_ = 20;
         pumpFrameBytes_ = qint64(sizeof(float)) * channels_;
@@ -287,20 +289,86 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
             pumpFrameBytes_ = channels_;
         pumpBytesPerTick_ = std::max(qint64(periodBytes), pumpFrameBytes_);
         pumpRateFramesPerUsec_ = sampleRate_ / 1000.0;
+        // Channel capacity: kernel pipe (~64 KiB) + aplay's ALSA ring (up to
+        // ~1 s). A fresh aplay blocks in its first snd_pcm_writei until the
+        // device consumes roughly half its period config, so the bytes we
+        // hand it before that point are all still unplayed when the write
+        // finally returns — treating them as "played" was what made the
+        // cursor sprint ahead of the sound at start. Cap the backlog at two
+        // periods (~40 ms of audio): the cursor then leads the audible
+        // position by a small constant instead of growing into hundreds of
+        // milliseconds, and every tick beyond that cap idles while the sink
+        // drains — perfectly regular motion paced by the device itself.
+        pumpMaxBacklogFrames_ =
+            std::max(qint64(1), 2 * pumpBytesPerTick_ / pumpFrameBytes_);
         framesFed_ = posFrames_ - startFrames_;
         if (framesFed_ < 0) framesFed_ = 0;
         clockBaseMs_ = 0;
         playClock_.restart();          // fresh, monotonic session clock
         lastPumpUsec_ = 0;
-        DBG(QStringLiteral("AudioPlayer: push pump started (period=%1 bytes, %2 Hz, framesFed=%3)")
-                .arg(pumpBytesPerTick_).arg(sampleRate_).arg(framesFed_));
+        DBG(QStringLiteral("AudioPlayer: push pump started (period=%1 bytes, %2 Hz, "
+                           "backlogCap=%3 frames, framesFed=%4)")
+                .arg(pumpBytesPerTick_).arg(sampleRate_)
+                .arg(pumpMaxBacklogFrames_).arg(framesFed_));
         pump_->start(pumpPeriodMs_);
     }
 }
 
 // Timer-driven push-mode output for the external-player fallback sinks.
 void AudioPlayer::pumpAudio() {
-    if (!playing_ || !outDevice_ || !buf_) { if (pump_) pump_->stop(); return; }
+    if (!playing_ || !buf_) { if (pump_) pump_->stop(); return; }
+    // Drain accounting: sinkQueuedFrames_ counts audio that has been
+    // generated but is not heard yet — bytes still in pumpBuf_ plus bytes
+    // the child has taken from its stdin pipe/ALSA ring. ProcessSink knows
+    // exactly how many bytes it handed to the kernel and how many are still
+    // queued at our side; whatever the child has consumed beyond that must
+    // have gone out of the speaker, so we retire it here. Keeping this
+    // number honest is what makes the backlog cap pace the cursor to the
+    // audible stream instead of letting it sprint ahead of the sound.
+    if (outDevice_) {
+        if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
+            const qint64 unplayedBytes = ps->discardBuffered() + pumpBuf_.size();
+            const qint64 unplayedFrames =
+                unplayedBytes / std::max(qint64(1), pumpFrameBytes_);
+            if (unplayedFrames < sinkQueuedFrames_)
+                sinkQueuedFrames_ = unplayedFrames;  // child consumed backlog
+        }
+        // Audible end-of-range: the whole session range was generated but
+        // its tail still sits in the output channel. Do NOT declare the
+        // session finished while that tail plays — otherwise MainWindow
+        // rewinds the cursor (and re-issues play(), whose stop() first cuts
+        // the stale tail short) while the file end is still sounding. Once
+        // the backlog drains, finish normally. The guard timer below keeps
+        // a wedged child from hanging the session forever.
+        if (endPending_) {
+            if (sinkQueuedFrames_ <= 0 && pumpBuf_.isEmpty()) {
+                DBG(QStringLiteral("AudioPlayer: audible tail drained at frame %1 "
+                                   "(%2 ms after range end) — finishing session")
+                        .arg(posFrames_)
+                        .arg(playClock_.isValid() ? playClock_.elapsed() : 0));
+                endPending_ = false;
+                playing_ = false;
+                paused_ = false;
+                if (pump_) pump_->stop();
+                emit loopStateChanged(false);
+                emit finished();
+                return;
+            }
+            if (playClock_.isValid() &&
+                clockBaseMs_ + playClock_.elapsed() - lastPumpUsec_ / 1000 > 3000) {
+                DBG("AudioPlayer: end-of-range drain wait timed out (3 s) — forcing finish");
+                endPending_ = false;
+                playing_ = false;
+                paused_ = false;
+                if (pump_) pump_->stop();
+                emit loopStateChanged(false);
+                emit finished();
+                return;
+            }
+            return;   // keep pumping nothing; just watch the backlog drain
+        }
+    }
+    if (!outDevice_) { if (pump_) pump_->stop(); return; }
     // Produce PCM in native sink format via the same generator as pull mode.
     QByteArray tmp;
     tmp.resize(int(pumpBytesPerTick_));
@@ -329,8 +397,10 @@ void AudioPlayer::pumpAudio() {
     if (written < pumpBuf_.size()) {
         if (pumpBuf_.size() - written > pumpBytesPerTick_ * 16)
             pumpBuf_.remove(0, int(pumpBuf_.size() - pumpBytesPerTick_ * 16));
+        sinkQueuedFrames_ += written / pumpFrameBytes_;
         pumpBuf_.remove(0, int(written));
     } else {
+        sinkQueuedFrames_ += pumpBuf_.size() / pumpFrameBytes_;
         pumpBuf_.clear();
     }
 }
@@ -370,10 +440,32 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
             const qint64 maxPerTick =
                 std::max(qint64(1), pumpBytesPerTick_ / fbBytesPerFrame);
             wantFrames = std::min(wantFrames, maxPerTick);
+            // Backlog cap: never generate audio the output channel cannot
+            // absorb before being heard. sinkQueuedFrames_ tracks what aplay
+            // has accepted but not played (pumpBuf_ + kernel pipe); once the
+            // backlog reaches the cap the pump idles for whole ticks and the
+            // cursor moves in lockstep with the device drain — no sprint at
+            // startup, no stutter from sub-millisecond wall-clock budgets.
+            const qint64 room = pumpMaxBacklogFrames_ - sinkQueuedFrames_;
+            if (room <= 0) return 0;    // channel full: wait for the drain
+            wantFrames = std::min(wantFrames, room);
         } else {   // clock not running (legacy/manual caller): byte budget
             wantFrames = maxBytes / fbBytesPerFrame;
         }
         qint64 framesAvail = loopEnd_ - posFrames_;
+        // Push mode: the *audible* end is what matters. Once the generator
+        // reaches loopEnd_ but PCM from this range still sits in the output
+        // channel (pumpBuf_/pipe backlog), arm endPending_: pumpAudio()
+        // watches the backlog drain and only then declares finished(). This
+        // keeps the cursor at the range end while the tail plays, instead of
+        // teleporting back to the start with the file end still sounding
+        // ("play to the end: cursor jumps back, next play starts with
+        // leftover audio from the old end").
+        if (framesAvail <= 0 && outDevice_ && !looping_ &&
+            (sinkQueuedFrames_ > 0 || !pumpBuf_.isEmpty())) {
+            endPending_ = true;
+            return 0;   // tail still audible: idle ticks only
+        }
         if (framesAvail <= 0) {
             if (looping_) { posFrames_ = loopStart_; framesAvail = loopEnd_ - posFrames_; }
             else { playing_ = false; emit loopStateChanged(false); emit finished(); return 0; }
@@ -591,11 +683,17 @@ void AudioPlayer::stop() {
         // on our side — the kernel pipe + aplay's ALSA ring still hold stale
         // audio from the old position and must not keep playing (and must
         // not make us wait for their drain before the cursor rewinds).
+        // Always force: stop is taken both mid-session AND right after a
+        // natural end-of-file (MainWindow rewinds the cursor via play()),
+        // when playing_ is already false but the sink child is still alive
+        // with the file tail sitting unplayed in its stdin pipe — exactly
+        // the "next Play starts with leftover audio from the old end" bug.
         if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
-            ps->flushPipe(/*force=*/hadSession);
+            ps->flushPipe(/*force=*/true);
             ps->waitForBytesWritten(50);  // nothing left queued after flush; no-op guard
         }
         pumpBuf_.clear();
+        sinkQueuedFrames_ = 0;
         outDevice_->close(); delete outDevice_; outDevice_ = nullptr;
     }
     playing_ = false;

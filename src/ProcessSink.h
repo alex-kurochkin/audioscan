@@ -29,8 +29,13 @@ public:
     // up to ~0.5 s of audio from the OLD position, which must not keep
     // playing after a click-to-seek ("cursor jumps late" symptom).
     void flushPipe(bool force = false);
-    // Bytes accepted by write() but still queued for the child's stdin.
+    // Bytes handed to the child that it has not played yet (QProcess queue +
+    // kernel pipe estimate). Used by the push pump for backlog accounting.
     qint64 discardBuffered();
+    // Zero the cumulative handoff counter: called whenever the child is
+    // killed/respawned, so bytes in flight with the old process are not
+    // counted against the fresh one.
+    void resetHandoff();
 
 protected:
     qint64 readData(char *, qint64) override;
@@ -47,6 +52,7 @@ private:
     QString program_;
     QStringList args_;
     QProcess *proc_ = nullptr;
+    qint64 handedOff_ = 0;       // bytes written into the current child (pipe accounting)
     bool started_ = false;     // child was successfully spawned at least once
     bool finishing_ = false;   // EOF sent; deferred SIGTERM escalation armed
     bool flushedRecently_ = false; // last spawn followed flushPipe(): warm start

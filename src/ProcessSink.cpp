@@ -83,9 +83,23 @@ void ProcessSink::restartWithArgs(const QStringList &newArgs) {
 qint64 ProcessSink::readData(char *, qint64) { return 0; }
 
 qint64 ProcessSink::discardBuffered() {
-    // Bytes that were accepted by write() but not yet flushed into the
-    // child's stdin pipe — stale audio from before a seek/stop.
-    return proc_ ? proc_->bytesToWrite() : 0;
+    // Bytes the child has not actually played yet: QProcess's own queue
+    // plus everything sitting in the kernel pipe. The pipe is invisible to
+    // QProcess (bytesToWrite() drops to 0 once the OS accepted the bytes),
+    // but aplay may still have up to a full pipe (~64 KiB) of unplayed audio
+    // in it — that blind spot previously made AudioPlayer believe the
+    // backlog had drained instantly and sprint the cursor ahead of the
+    // sound. handedOff_ counts every byte ever written into the *current*
+    // child; resetHandoff() zeroes it whenever the child is killed/respawned
+    // (flushPipe), because everything in flight dies with the old process.
+    if (!proc_) return 0;
+    const qint64 queued = proc_->bytesToWrite();
+    const qint64 inPipe = handedOff_ - queued;   // >=0: accepted by the kernel
+    return queued + std::max(inPipe, qint64(0));
+}
+
+void ProcessSink::resetHandoff() {
+    handedOff_ = 0;
 }
 
 void ProcessSink::flushPipe(bool force) {
@@ -125,6 +139,10 @@ void ProcessSink::flushPipe(bool force) {
     delete proc_;                        // reap synchronously; no orphan
     proc_ = nullptr;
     started_ = false;                    // ensureStarted() respawns lazily
+    // Everything in flight (QProcess queue + kernel pipe) died with the
+    // child: restart the handoff accounting so the fresh process starts
+    // from an empty backlog.
+    handedOff_ = 0;
 }
 
 qint64 ProcessSink::writeData(const char *data, qint64 len) {
@@ -148,6 +166,7 @@ qint64 ProcessSink::writeData(const char *data, qint64 len) {
                                     .arg(proc_->bytesToWrite());
         return 0;   // transient back-pressure: retry later with the same data
     }
+    handedOff_ += written;   // backlog accounting for the push pump's pacing cap
     proc_->waitForBytesWritten(500);
     // A dead child (e.g. "aplay: not found" — QProcess::start() succeeds even
     // when execvp fails; the failure only surfaces asynchronously as
