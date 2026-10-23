@@ -11,6 +11,8 @@
 // FIONREAD on the child-stdin pipe fd (exact unread-pipe measurement, see
 // ProcessSink::bytesInPipe()). POSIX only — this project targets Linux/Debian.
 #include <sys/ioctl.h>
+#include <unistd.h>
+#include <cstring>
 
 namespace {
 // Resolve an external player up front. QProcess::start() succeeds even when
