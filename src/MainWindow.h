@@ -46,7 +46,9 @@ public:
     // Test hooks (only compiled with -DAUDIOSCOUT_TESTING).
     QTableView *testTable() const { return table_; }
     FileTableModel *testModel() const { return model_; }
-    void openColumnsDialogForTest() { cols_->openDialog(this); }
+    // Opens the modal "Columns" chooser and applies/saves the result once it
+    // closes; returns true if the user accepted, false on Cancel/reject.
+    bool openColumnsDialogForTest() { return cols_->openDialog(this); }
 #endif
 
 protected:

@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QTableView>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -219,7 +220,7 @@ void ColumnLayoutController::saveColumnWidths() {
     Settings::instance().setColumnWidths(map);
 }
 
-void ColumnLayoutController::openDialog(QWidget *parentWindow) {
+bool ColumnLayoutController::openDialog(QWidget *parentWindow) {
     QVector<int> fullOrder;
     QSet<int> shown;
     currentColumnLayout(model_, fullOrder, shown);
@@ -232,13 +233,13 @@ void ColumnLayoutController::openDialog(QWidget *parentWindow) {
 
     ColumnsDialog dlg(keys, labels, shown, parentWindow);
     dlg.setWindowTitle(dlg.tr("Columns"));
-    if (dlg.exec() != QDialog::Accepted) return;   // Cancel: nothing changes
+    if (dlg.exec() != QDialog::Accepted) return false;   // Cancel: nothing changes
 
     const QStringList selKeys = dlg.selectedKeys();
     if (selKeys.isEmpty()) {
         QMessageBox::warning(parentWindow, dlg.tr("Columns"),
                              dlg.tr("At least one column must be visible."));
-        return;
+        return false;
     }
     // Flush the currently displayed widths into the in-memory map first, so
     // columns that are about to be re-shown come back with their last size
@@ -274,6 +275,7 @@ void ColumnLayoutController::openDialog(QWidget *parentWindow) {
         updateSortIndicator();
     });
     emit columnsChanged();
+    return true;
 }
 
 ColumnsDialog::ColumnsDialog(const QStringList &keys, const QStringList &labels,
@@ -288,6 +290,7 @@ ColumnsDialog::ColumnsDialog(const QStringList &keys, const QStringList &labels,
         lay->addWidget(cb);
     }
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+    saveButton_ = bb->button(QDialogButtonBox::Save);
     connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
     lay->addStretch();

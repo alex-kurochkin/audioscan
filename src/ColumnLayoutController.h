@@ -42,7 +42,9 @@ public:
     void sortByModelColumn(int modelCol, Qt::SortOrder order);
 
     // ---- "Columns" button entry point ----
-    void openDialog(QWidget *parentWindow);
+    // Opens the modal chooser and applies/saves the result. Returns false if
+    // the dialog was cancelled or rejected (empty selection).
+    bool openDialog(QWidget *parentWindow);
 
 signals:
     // The visible-column set changed (dialog Save): the owner must re-run
@@ -63,13 +65,21 @@ private:
 // Save/Cancel buttons. Cancel leaves the table untouched; Save applies the
 // new visible set and persists it (header order is kept as-is).
 class ColumnsDialog : public QDialog {
+    Q_OBJECT
 public:
     explicit ColumnsDialog(const QStringList &keys, const QStringList &labels,
                            const QSet<int> &shown, QWidget *parent = nullptr);
     // Column ids (indices into the label list) checked in the dialog.
     QStringList selectedKeys() const;
 
+#ifdef AUDIOSCOUT_TESTING
+    // The "Save" button of the dialog's button box — lets the in-process
+    // self-tests (main.cpp, AUDIOSCOUT_COLSAVE) click it like a user would.
+    QPushButton *saveButtonForTest() const { return saveButton_; }
+#endif
+
 private:
     QStringList keys_;
     QVector<class QCheckBox *> checks_;
+    class QPushButton *saveButton_ = nullptr;
 };

@@ -1,2 +1,14 @@
 build/
-*.ts
+build-test/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.so
+*.a
+*.exe
+*.dll
+*.out
+*.log
+*_autogen/
