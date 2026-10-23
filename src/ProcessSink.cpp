@@ -11,6 +11,7 @@
 // FIONREAD on the child-stdin pipe fd (exact unread-pipe measurement, see
 // ProcessSink::bytesInPipe()). POSIX only — this project targets Linux/Debian.
 #include <sys/ioctl.h>
+#include <fcntl.h>      // ::open, O_RDONLY, O_NONBLOCK
 #include <unistd.h>
 #include <cstring>
 
