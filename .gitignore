@@ -2,6 +2,7 @@ build/
 build-test/
 CMakeCache.txt
 CMakeFiles/
+.vscode/
 cmake_install.cmake
 Makefile
 *.o
@@ -12,3 +13,4 @@ Makefile
 *.out
 *.log
 *_autogen/
+*.sh
