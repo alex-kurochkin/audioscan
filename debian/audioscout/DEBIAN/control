@@ -1,0 +1,18 @@
+Package: audioscout
+Version: 1.0.0-1
+Architecture: amd64
+Maintainer: Alex Kurochkin <kurochkin.alex@gmail.com>
+Installed-Size: 511
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 4.0), libqt6core6t64 (>= 6.9.1), libqt6gui6 (>= 6.9.1), libqt6multimedia6 (>= 6.6.1), libqt6sql6 (>= 6.1.2), libqt6widgets6 (>= 6.3.0), libsndfile1 (>= 1.0.20), libstdc++6 (>= 11), libtag2 (>= 2.0), libqt6sql6-sqlite, ffmpeg, alsa-utils
+Recommends: libtag1v5
+Section: sound
+Priority: optional
+Description: Fast audio catalog listening and editing
+ AudioScout scans a directory tree of audio files, shows waveform and
+ spectrogram previews, supports markers, range selection, looping
+ playback, in-place editing (mute, normalize, delete selection) with
+ disk-backed undo/redo, hotkeys and per-user settings stored in
+ config.json and an SQLite database.
+ .
+ Playback uses Qt Multimedia with external helpers (ffplay from ffmpeg,
+ aplay from alsa-utils) as fallback decoders for compressed formats.

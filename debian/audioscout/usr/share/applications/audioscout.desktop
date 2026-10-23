@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AudioScout
+Comment=Fast audio catalog listening and editing
+Exec=audioscout
+Terminal=false
+Categories=Qt;AudioVideo;Audio;

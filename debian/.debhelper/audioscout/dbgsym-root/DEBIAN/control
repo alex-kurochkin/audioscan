@@ -1,0 +1,13 @@
+Package: audioscout-dbgsym
+Package-Type: ddeb
+Source: audioscout
+Version: 1.0.0-1
+Auto-Built-Package: debug-symbols
+Architecture: amd64
+Maintainer: Alex Kurochkin <kurochkin.alex@gmail.com>
+Installed-Size: 3596
+Depends: audioscout (= 1.0.0-1)
+Section: debug
+Priority: optional
+Description: debug symbols for audioscout
+Build-Ids: f8c59d7b0d81d27920b4f8ac70cc672fc6da8ce9
