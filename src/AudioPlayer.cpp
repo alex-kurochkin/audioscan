@@ -269,7 +269,10 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
         });
         sink_->start(device_);
     } else {
-        // Realtime pacing: feed exactly one period of audio per timer tick.
+        // Realtime pacing: feed the sink in wall-clock steps (see
+        // generateBytes()). Start the monotonic session clock at the moment
+        // audio begins flowing; framesFed_ counts total audio handed to the
+        // sink so seek() can re-anchor the clock to the audible position.
         if (!pump_) {
             pump_ = new QTimer(this);
             connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
@@ -283,6 +286,14 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
         else if (outFmt_.sampleFormat() == QAudioFormat::UInt8)
             pumpFrameBytes_ = channels_;
         pumpBytesPerTick_ = std::max(qint64(periodBytes), pumpFrameBytes_);
+        pumpRateFramesPerUsec_ = sampleRate_ / 1000.0;
+        framesFed_ = posFrames_ - startFrames_;
+        if (framesFed_ < 0) framesFed_ = 0;
+        clockBaseMs_ = 0;
+        playClock_.restart();          // fresh, monotonic session clock
+        lastPumpUsec_ = 0;
+        DBG(QStringLiteral("AudioPlayer: push pump started (period=%1 bytes, %2 Hz, framesFed=%3)")
+                .arg(pumpBytesPerTick_).arg(sampleRate_).arg(framesFed_));
         pump_->start(pumpPeriodMs_);
     }
 }
@@ -294,8 +305,10 @@ void AudioPlayer::pumpAudio() {
     QByteArray tmp;
     tmp.resize(int(pumpBytesPerTick_));
     const qint64 produced = generateBytes(tmp.data(), pumpBytesPerTick_);
-    if (produced <= 0) {   // playback reached the end (generateBytes emitted finished)
-        if (pump_) pump_->stop();
+    if (produced <= 0) {   // nothing due this tick, or end-of-range reached
+        if (!playing_) {   // generateBytes emitted finished() — stop pumping
+            if (pump_) pump_->stop();
+        }
         return;
     }
     tmp.resize(int(produced));
@@ -338,13 +351,41 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
         const bool i16 = outFmt_.sampleFormat() == QAudioFormat::Int16;
         const bool u8 = outFmt_.sampleFormat() == QAudioFormat::UInt8;
         const qint64 fbBytesPerFrame = channels_ * (i16 ? qint64(2) : u8 ? qint64(1) : qint64(4));
+        // Wall-clock pacing (see playClock_ in the header): advance only by
+        // the audio time that has actually elapsed since the last pump tick.
+        // The old code moved posFrames_ by however many bytes the OS timer
+        // happened to fire for — during aplay's startup window every tick
+        // was accepted instantly, so the cursor ran ~5x real speed until the
+        // pipe filled up, then crawled at the drain rate while staying far
+        // ahead of the audible position. Now the cursor tracks the wall
+        // clock exactly, with a one-period cap per tick so a stalled sink
+        // (blocked child, missed ticks) can never teleport the playhead.
+        qint64 wantFrames = 0;
+        if (playClock_.isValid()) {
+            // Continuous session time: elapsed segment + accumulated base.
+            const qint64 nowUsec = (clockBaseMs_ + playClock_.elapsed()) * 1000;
+            const qint64 dueUsec = std::max(qint64(0), nowUsec - lastPumpUsec_);
+            lastPumpUsec_ = nowUsec;
+            wantFrames = qint64(dueUsec * pumpRateFramesPerUsec_);
+            const qint64 maxPerTick =
+                std::max(qint64(1), pumpBytesPerTick_ / fbBytesPerFrame);
+            wantFrames = std::min(wantFrames, maxPerTick);
+        } else {   // clock not running (legacy/manual caller): byte budget
+            wantFrames = maxBytes / fbBytesPerFrame;
+        }
         qint64 framesAvail = loopEnd_ - posFrames_;
         if (framesAvail <= 0) {
             if (looping_) { posFrames_ = loopStart_; framesAvail = loopEnd_ - posFrames_; }
             else { playing_ = false; emit loopStateChanged(false); emit finished(); return 0; }
         }
-        qint64 wantFrames = std::min(maxBytes / fbBytesPerFrame, framesAvail);
-        if (wantFrames <= 0) return 0;
+        wantFrames = std::min(wantFrames, framesAvail);
+        if (wantFrames <= 0) {
+            // Nothing audible is due this tick (early tick of the timer, or
+            // sub-millisecond rounding). Return 0 WITHOUT touching posFrames_
+            // — the old code still emitted positionChanged on empty chunks,
+            // which made the cursor stutter ("moves unevenly").
+            return 0;
+        }
         const float *src = buf_ + posFrames_ * channels_;
         const double v = volume_.load();
         if (i16) {
@@ -365,6 +406,7 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
                 dst[i] = float(src[i] * v);
         }
         posFrames_ += wantFrames;
+        framesFed_ += wantFrames;   // total audio handed to the sink (diagnostics)
         emit positionChanged(posFrames_);
         return wantFrames * fbBytesPerFrame;
     }
@@ -413,6 +455,13 @@ void AudioPlayer::pause() {
     playing_ = false;
     paused_ = true;
     if (pump_) pump_->stop();
+    // Freeze the wall clock: remember how much real playback time elapsed
+    // so resume() continues from the same audible point instead of counting
+    // the paused interval as played audio.
+    if (!qtSinkMode_ && playClock_.isValid()) {
+        clockBaseMs_ += playClock_.elapsed();
+        playClock_.invalidate();
+    }
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
     // Push mode: freeze the in-flight PCM too. Without this, up to ~64 KiB
     // of audio already sitting in the aplay child's stdin pipe keeps
@@ -441,6 +490,15 @@ void AudioPlayer::resume() {
         if (device_ && !device_->isOpen()) device_->open(QIODevice::ReadOnly);
         sink_->start(device_);
     } else {
+        // Re-anchor the wall clock: the paused interval must not count as
+        // played audio, and framesFed_ keeps tracking total audio handed to
+        // the sink (used by seek() to re-derive the audible position).
+        framesFed_ = posFrames_ - startFrames_;
+        if (framesFed_ < 0) framesFed_ = 0;
+        clockBaseMs_ = 0;              // resume() already folded the paused
+                                       // segment away: new continuous base
+        playClock_.restart();
+        lastPumpUsec_ = 0;
         if (!pump_) {
             pump_ = new QTimer(this);
             connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
@@ -487,6 +545,16 @@ void AudioPlayer::seek(qint64 frame) {
         // heard promptly; the timer pump simply feeds from the new position.
         const bool hadQueued = !pumpBuf_.isEmpty();
         pumpBuf_.clear();
+        // Re-anchor the wall clock at the new position: everything fed to
+        // the sink before this point is stale (flushed below), so the pacing
+        // budget restarts here — otherwise generateBytes() keeps counting
+        // against the old session start and the cursor drifts after seeks.
+        if (playClock_.isValid())
+            clockBaseMs_ += playClock_.elapsed();
+        framesFed_ = posFrames_;
+        lastPumpUsec_ = clockBaseMs_ * 1000;   // µs on the continuous clock
+        DBG(QStringLiteral("AudioPlayer: push seek re-anchored clock to frame %1 (%2 ms)")
+                .arg(posFrames_).arg(clockBaseMs_));
         // Also flush everything already handed to the external sink process:
         // its stdin pipe holds up to ~64 KiB of stale PCM from the OLD
         // position, which aplay would otherwise keep playing for hundreds of
@@ -513,6 +581,7 @@ void AudioPlayer::resumeOrStopToggle() {
 void AudioPlayer::stop() {
     const bool hadSession = playing_ || paused_;
     if (pump_) pump_->stop();
+    playClock_.invalidate();   // session clock stops with the session
     if (sink_ && sink_->state() != QAudio::StoppedState) sink_->stop();
     if (outDevice_) {
         // Stop must be *instantly* silent: close() only sends EOF, letting

@@ -3,6 +3,7 @@
 #include <QAudioFormat>
 #include <QObject>
 #include <QIODevice>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <atomic>
 #include <cstdint>
@@ -120,6 +121,20 @@ private:
     qint64 pumpBytesPerTick_ = 0;
     qint64 pumpFrameBytes_ = 0;
     int pumpPeriodMs_ = 20;
+    // Wall-clock pacing for the push pump: the cursor must advance in step
+    // with real time, not with how many bytes the OS timer happened to fire
+    // for. A fixed "one period per tick" pump runs fast during the child's
+    // startup window (the sink accepts everything instantly, so every tick
+    // advances a full period while nothing audible has been consumed yet)
+    // and then slows to the drain rate — exactly the "cursor races, then
+    // crawls, always ahead of the sound" symptom. We instead track how much
+    // audio has actually been accepted by the sink vs. how much wall time
+    // has passed since playback started, and only generate what is due.
+    QElapsedTimer playClock_;      // monotonic session clock (started on play/resume)
+    qint64 clockBaseMs_ = 0;       // ms accumulated before the current run segment
+    qint64 framesFed_ = 0;         // total frames handed to the sink this session
+    qint64 lastPumpUsec_ = 0;      // previous pump tick (µs on playClock_)
+    double pumpRateFramesPerUsec_ = 0.0;  // sampleRate / 1000
 
     // Frame where the most recent play session started; used by MainWindow
     // so that pressing Play after Stop resumes from that point.
