@@ -59,6 +59,15 @@ public:
     // demonstrably pulled out of the pipe (into its ALSA ring / out of the
     // speaker). The push pump drives the audible cursor from this counter.
     qint64 auditedBytesIntoChild();
+    // Exact number of bytes the child process currently has open on ITS read
+    // end of our stdin pipe, resolved via /proc/<pid>/fd/0 -> pipe inode ->
+    // matching fd in /proc/<child-pid>/fd/*. This is aplay's private handle:
+    // flushPipe()/reapChild() close OUR write end, but if the child lingers
+    // (blocked in snd_pcm_writei(), ignoring SIGTERM) it keeps draining the
+    // old pipe through this fd — the "next play starts with leftover audio
+    // from the file end" symptom. shutdown() closes it directly so stale PCM
+    // can never survive an interrupt. Returns -1 when unresolvable.
+    qint64 closeChildStdinReadEnd();
     // Zero the cumulative handoff counter: called whenever the child is
     // killed/respawned, so bytes in flight with the old process are not
     // counted against the fresh one.

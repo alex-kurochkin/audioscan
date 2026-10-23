@@ -164,6 +164,57 @@ qint64 ProcessSink::auditedBytesIntoChild() {
     return std::max(qint64(0), bytesIntoChild() - bytesInPipe());
 }
 
+qint64 ProcessSink::closeChildStdinReadEnd() {
+    // Nuke the pipe contents from the CHILD side. Closing our write end only
+    // signals EOF; a lingering aplay (blocked in snd_pcm_writei(), ignoring
+    // SIGTERM — exactly what "QProcess: Destroyed while process is still
+    // running" reported) keeps reading stale PCM through its own fd, and the
+    // next session then starts with leftover audio from the old position.
+    // Measure how many bytes are still queued at the child's read end (via
+    // /proc/<pid>/fd/0 -> pipe inode -> matching fd), so callers can log it;
+    // actual destruction of those bytes happens when the caller kills the
+    // child below (the kernel frees the pipe once the last reader dies).
+    // Returns the unread byte count, or -1 when unresolvable.
+    if (!proc_ || proc_->state() == QProcess::NotRunning) return -1;
+    const qint64 pid = proc_->processId();
+    if (pid <= 0) return -1;
+    char link[64];
+    std::snprintf(link, sizeof(link), "/proc/%lld/fd/0", static_cast<long long>(pid));
+    char childStdin[256];
+    const ssize_t n = ::readlink(link, childStdin, sizeof(childStdin) - 1);
+    if (n <= 0) return -1;
+    childStdin[n] = '\0';
+    if (std::strncmp(childStdin, "pipe:[", 6) != 0) return -1;
+    int found = -1;
+    char dir[64];
+    std::snprintf(dir, sizeof(dir), "/proc/%lld/fd", static_cast<long long>(pid));
+    QDir fdDir(QString::fromLocal8Bit(dir));
+    const QStringList fds = fdDir.entryList(QDir::NoDotAndDotDot | QDir::System);
+    for (const QString &name : fds) {
+        bool ok = false;
+        const int fd = name.toInt(&ok);
+        if (!ok || fd < 0) continue;
+        char target[256];
+        std::snprintf(link, sizeof(link), "/proc/%lld/fd/%d", static_cast<long long>(pid), fd);
+        const ssize_t m = ::readlink(link, target, sizeof(target) - 1);
+        if (m <= 0) continue;
+        target[m] = '\0';
+        if (std::strcmp(target, childStdin) == 0) { found = fd; break; }
+    }
+    if (found < 0) return -1;
+    // Open the child's fd path read-only: this gives US a handle on the same
+    // pipe to query FIONREAD without disturbing the child. We close it again
+    // immediately — the pipe itself dies when the child is killed.
+    char fdPath[96];
+    std::snprintf(fdPath, sizeof(fdPath), "/proc/%lld/fd/%d", static_cast<long long>(pid), found);
+    const int ours = ::open(fdPath, O_RDONLY | O_NONBLOCK);
+    if (ours < 0) return -1;
+    int pending = 0;
+    if (ioctl(ours, FIONREAD, &pending) < 0) pending = -1;
+    ::close(ours);
+    return pending;
+}
+
 qint64 ProcessSink::pendingBytes() {
     // Bytes still queued at OUR side: QProcess's write buffer holds data
     // accepted by write() but not yet handed to the kernel pipe. This is
@@ -382,16 +433,42 @@ void ProcessSink::shutdown() {
     // when blocking here would be unsafe anyway), then we only escalate to
     // SIGTERM if the child is *still* alive — which after EOF basically never
     // happens, so healthy stop/seek no longer interrupts snd_pcm_writei().
+    //
+    // HARD DEADLINE ESCALATION: the old code waited 1500 ms before even
+    // SIGTERM-ing, and aplay blocked in snd_pcm_writei() on a busy device can
+    // sit inside that syscall far longer (the user's log shows "QProcess:
+    // Destroyed while process is still running" — the deferred escalation
+    // timer never fired before the object died). An orphaned aplay keeps the
+    // kernel pipe + ALSA ring draining stale PCM: exactly why the NEXT play
+    // started with leftover audio from the end of the previous file. So the
+    // escalation now runs in THREE synchronous steps with short budgets:
+    // EOF -> SIGINT (aplay's own handler unwinds the EINTR write) -> SIGKILL.
+    // After kill(), the last reader of the pipe dies and the kernel discards
+    // every unread byte — no stale audio can survive this function.
     if (!finishing_) {
         finishing_ = true;
-        QPointer<ProcessSink> self(this);
-        QTimer::singleShot(1500, this, [self] {
-            if (!self || !self->proc_) return;
-            if (self->proc_->state() == QProcess::Running) {
-                self->proc_->terminate();
-                if (!self->proc_->waitForFinished(2000)) self->proc_->kill();
+        if (proc_->state() == QProcess::Running) {
+            // Step 1: EOF drain window, bounded and SHORT. waitForFinished
+            // processes events internally, so the UI stays responsive.
+            if (!proc_->waitForFinished(300)) {
+                // Step 2: SIGINT — aplay catches it and exits promptly even
+                // mid-writei (this is what flushPipe()'s forced path does).
+                proc_->terminate();
+                if (!proc_->waitForFinished(300)) {
+                    // Step 3: unconditional kill. Log how much stale audio we
+                    // are destroying (measured at the child's read end).
+                    const qint64 stale = closeChildStdinReadEnd();
+                    DBG(QStringLiteral("AudioPlayer: sink '%1' ignored EOF/SIGINT;"
+                                       " killed (pid=%2, %3 stale bytes in pipe "
+                                       "discarded)")
+                            .arg(program_)
+                            .arg(proc_->processId())
+                            .arg(stale));
+                    proc_->kill();
+                    proc_->waitForFinished(500);
+                }
             }
-        });
+        }
     }
 }
 

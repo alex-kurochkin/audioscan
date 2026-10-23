@@ -185,6 +185,11 @@ private:
     bool endPending_ = false;             // range generated, waiting for the
                                           // audible tail to drain before
                                           // declaring finished()
+    qint64 endDrainSinceMs_ = 0;          // session-clock ms when endPending_
+                                          // was armed (3 s guard measures
+                                          // from here)
+    qint64 lastSyncLogMs_ = 0;            // session-clock ms of the last
+                                          // "push sync" telemetry line
 
     // Frame where the most recent play session started; used by MainWindow
     // so that pressing Play after Stop resumes from that point.
