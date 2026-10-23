@@ -145,13 +145,30 @@ private:
     double pumpRateFramesPerUsec_ = 0.0;  // sampleRate / 1000
     qint64 pumpMaxBacklogFrames_ = 0;     // channel capacity in frames (pacing cap)
     // Consumption tracking for the push pump (see AudioPlayer::pumpAudio):
-    // ProcessSink's cumulative handoff counter as observed on the previous
-    // tick; its delta is what the child took from our write buffer into the
-    // kernel pipe/ALSA ring since then. audibleFrames_ is the running maximum
-    // of (generated - backlog): the drain estimate can only ever grow while a
-    // session plays, so seeks/pauses must rebase it explicitly.
+    // ProcessSink delivers observable counters — bytes accepted by write(),
+    // bytes actually delivered to the child's stdin, and bytes still sitting
+    // unread in the pipe. The push pump derives the AUDIBLE position from
+    // these; lastHandedOff_ keeps the previous tick's values for delta
+    // diagnostics around forced flushes/respawns of the child.
     qint64 lastHandedOff_ = 0;
-    qint64 audibleFrames_ = 0;
+    // Cursor model (push mode): posFrames_ IS the audible position — the UI
+    // paints it directly, so it must never be driven by the wall clock or by
+    // generation speed. Each tick derives how much audio the child actually
+    // consumed from its stdin (ProcessSink::bytesIntoChild delta, corrected
+    // by the unread-pipe level) and advances the cursor by exactly that
+    // amount. `consumedFrames_` counts consumption since the session start;
+    // `fedMinusConsumed_` is the conservative backlog estimate
+    // (generated/fed - consumed) capped at the measured channel occupancy
+    // (our buffers + pipe + aplay's ALSA ring, see pumpChannelReserveFrames_);
+    // the pacing gate keeps it under the channel capacity so the cursor
+    // tracks the sound with a bounded constant delay instead of sprinting
+    // ahead at startup and crawling afterwards. Seeks/pauses flush the
+    // channel and rebase all counters explicitly.
+    qint64 consumedFrames_ = 0;
+    qint64 fedMinusConsumed_ = 0;
+    qint64 lastIntoChild_ = 0;     // bytesIntoChild() at the previous tick
+    qint64 lastPipeUnread_ = 0;    // bytesInPipe() at the previous tick
+    qint64 pumpChannelReserveFrames_ = 0;  // aplay's ALSA ring estimate (frames)
     bool endPending_ = false;             // range generated, waiting for the
                                           // audible tail to drain before
                                           // declaring finished()

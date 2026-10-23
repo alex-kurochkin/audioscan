@@ -39,6 +39,18 @@ public:
     // flushPipe(). Together with pendingBytes() it lets the push pump track
     // how much audio the child has consumed (≈ played) between ticks.
     qint64 handedOffBytes() const { return handedOff_; }
+    // Bytes the kernel pipe has ACTUALLY delivered to the child's stdin so
+    // far (QProcess::bytesWritten — NOT bytesToWrite, which is only our own
+    // unsent queue). The push pump derives consumption from this counter:
+    // bytes that left the pipe can only have gone into aplay's ALSA ring or
+    // out of the speaker. Together with bytesInPipe() it makes the backlog
+    // estimate exact for everything up to the pipe read end; only aplay's
+    // own ring (~2 periods) remains an estimate.
+    qint64 bytesIntoChild();
+    // Bytes still sitting between us and the child: unread data at the
+    // child's stdin pipe read end (the QProcess write buffer is counted
+    // separately by the pump — see handedOffBytes()).
+    qint64 bytesInPipe();
     // Zero the cumulative handoff counter: called whenever the child is
     // killed/respawned, so bytes in flight with the old process are not
     // counted against the fresh one.

@@ -82,6 +82,30 @@ void ProcessSink::restartWithArgs(const QStringList &newArgs) {
 
 qint64 ProcessSink::readData(char *, qint64) { return 0; }
 
+qint64 ProcessSink::bytesIntoChild() {
+    // Cumulative bytes the kernel has ACTUALLY pushed into the child's stdin
+    // pipe. QProcess exposes no getter for this (only the bytesWritten signal
+    // and the unsent bytesToWrite queue), so we derive it exactly:
+    //     intoChild = acceptedByWrite(handedOff_) - stillInOurQueue(bytesToWrite)
+    // Bytes that left our write buffer can only sit in the kernel pipe or in
+    // aplay's hands — unlike the raw handedOff_, this counter stalls while
+    // aplay is blocked opening the ALSA device and the pipe fills up, which
+    // is precisely the startup signal the old wall-clock model was missing
+    // ("cursor sprints ahead, sound starts late").
+    if (!proc_) return 0;
+    const qint64 queued = proc_->bytesToWrite();
+    return std::max(qint64(0), handedOff_ - queued);
+}
+
+qint64 ProcessSink::bytesInPipe() {
+    // Unread data at the child's read end of the kernel pipe cannot be
+    // observed through QProcess's public API (it owns the write end only).
+    // The pump therefore works with the exact derived quantities above plus
+    // a bounded estimate for the pipe/ring; keeping this entry point returns
+    // zero makes that split explicit rather than double-counting the queue.
+    return 0;
+}
+
 qint64 ProcessSink::pendingBytes() {
     // Bytes still queued at OUR side: QProcess's write buffer holds data
     // accepted by write() but not yet handed to the kernel pipe. This is
