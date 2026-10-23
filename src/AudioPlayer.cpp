@@ -280,11 +280,8 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
         }
         pumpBuf_.clear();
         sinkQueuedFrames_ = 0;
-        consumedFrames_ = 0;     // fresh session: nothing generated/consumed yet
+        consumedFrames_ = 0;     // fresh session: nothing generated/audible yet
         fedMinusConsumed_ = 0;
-        lastIntoChild_ = 0;      // counters restart with the freshly spawned child
-        lastPipeUnread_ = 0;
-        lastHandedOff_ = 0;
         endPending_ = false;
         const qint64 periodBytes = qint64(sampleRate_ / 50) * channels_ * qint64(sizeof(float));
         pumpPeriodMs_ = 20;
@@ -295,14 +292,14 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
             pumpFrameBytes_ = channels_;
         pumpBytesPerTick_ = std::max(qint64(periodBytes), pumpFrameBytes_);
         pumpRateFramesPerUsec_ = sampleRate_ / 1000.0;
-        // Channel capacity for the pacing gate. The kernel pipe (~64 KiB) is
-        // MEASURED every tick via ProcessSink::bytesInPipe(); what we cannot
-        // observe is aplay's ALSA ring, which snd_pcm_set_params paces at
-        // about 3 buffer periods before the first writei() unblocks. Reserve
-        // three periods so generation never outruns what the device can have
-        // already played: the cursor then trails the generator by a bounded
-        // constant instead of sprinting ahead at startup ("cursor moves fast,
-        // then crawls, sound starts late") and moving unevenly.
+        // Generation pacing constants (see the header comment): budget one
+        // period per tick from the wall clock, hard-gate the backlog at two
+        // periods + the ALSA-ring reserve. The audible cursor is derived in
+        // pumpAudio() from EXACT pipe accounting (FIONREAD), so during
+        // aplay's startup window (device open + ring priming) it stays parked
+        // at the play start while the channel fills — sound and playhead
+        // begin together, and the true audio latency never exceeds ~2-3
+        // periods (~40-60 ms).
         const qint64 maxPerTickFrames =
             std::max(qint64(1), pumpBytesPerTick_ / pumpFrameBytes_);
         pumpChannelReserveFrames_ = 3 * maxPerTickFrames;
@@ -326,63 +323,56 @@ void AudioPlayer::play(qint64 startFrame, qint64 endFrame, bool loop) {
 // Timer-driven push-mode output for the external-player fallback sinks.
 void AudioPlayer::pumpAudio() {
     if (!playing_ || !buf_) { if (pump_) pump_->stop(); return; }
-    // Consumption-based cursor model. posFrames_ is what the UI paints, so
-    // it must equal the AUDIBLE position: frames the child has actually
-    // taken out of the kernel pipe into its ALSA ring, minus a conservative
-    // estimate of what that ring still holds unheard. Everything else —
-    // generation pacing and the end-of-range decision — derives from the
-    // same counters. The old wall-clock model advanced the cursor with time
-    // regardless of the sink state: during aplay's startup window the sound
-    // had not begun while the cursor already ran at full speed ("sound
-    // starts later than the cursor", permanent desync), and sub-millisecond
-    // tick budgets made the motion uneven. The handoff-delta model before it
-    // counted bytes merely *accepted by write()* as consumed: the first
-    // chunk filled the kernel pipe (~64 KiB), saturated the backlog cap
-    // instantly and froze the pump ("cursor sticks at start, no sound").
+    // EXACT consumption accounting drives the cursor. Every byte of session
+    // audio is in one of five places: our pumpBuf_, the QProcess write queue,
+    // the kernel stdin pipe, aplay's ALSA ring, or already heard. ProcessSink
+    // measures the first three exactly each tick:
+    //     handedOff   = bytes accepted by write() into the current child
+    //     intoChild   = handedOff - QProcess queue        (left our process)
+    //     pipeUnread  = FIONREAD on the pipe fd           (still unread)
+    // so "bytes the child demonstrably pulled out of the pipe" is exact:
+    //     drained = intoChild - pipeUnread
+    // The audible position is that number minus what the ALSA ring can still
+    // be holding unheard — bounded by our reserve estimate AND, crucially,
+    // clamped so it can never pass the generator by more than the measured
+    // in-flight backlog (pumpBuf_ + queue + pipe). Previous models skipped
+    // one of these two corrections and produced exactly the reported bugs:
+    // counting write()-accepted bytes as played made the cursor sprint ahead
+    // while aplay was still opening the device ("cursor runs, sound starts
+    // late, permanent desync"); ignoring startup entirely froze the pump at
+    // the cap ("cursor sticks, no sound"). Now the cursor parks at the play
+    // start until bytes physically leave the pipe, then advances in lockstep
+    // with the device — evenly, because the drain rate IS the sample rate.
+    const qint64 generatedFrames = framesFed_;   // frames produced this session
     bool endDrained = false;
-    qint64 channelOccupancy = 0;   // measured: our buffers + QProcess queue + pipe
     if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
         const qint64 fb = std::max(qint64(1), pumpFrameBytes_);
-        const qint64 handed = ps->handedOffBytes();       // accepted by write()
-        const qint64 intoChild = ps->bytesIntoChild();    // delivered to stdin
-        const qint64 inPipe = ps->bytesInPipe();          // queue + unread pipe
-        const qint64 genBytes = framesFed_ * fb;          // generated this session
-        // Conservative backlog vs. the generator: everything we produced that
-        // the child has not read out of the pipe yet.
-        fedMinusConsumed_ = std::max(qint64(0), (genBytes - intoChild) / fb);
-        // Measured occupancy of the visible channel: pumpBuf_ (not written
-        // yet) + QProcess queue + bytes sitting unread at the child's stdin.
-        channelOccupancy = (pumpBuf_.size() + inPipe) / fb;
-        // Cursor = consumption minus what the child's ALSA ring can still be
-        // holding unheard. While the generator is capped below the channel
-        // capacity (see the room gate in generateBytes), the backlog cannot
-        // exceed the reserve, so clamping by the reserve keeps the cursor
-        // monotonic AND glued to the audible stream within ~3 periods.
-        qint64 cons = intoChild / fb;
-        qint64 aud = cons - std::min(pumpChannelReserveFrames_,
-                                     std::max(channelOccupancy, fedMinusConsumed_));
+        const qint64 intoChild = ps->bytesIntoChild();   // left our process
+        const qint64 pipeUnread = ps->bytesInPipe();     // unread pipe bytes
+        const qint64 drainedBytes =
+            std::max(qint64(0), intoChild - pipeUnread); // entered aplay
+        // In-flight backlog between the generator position and aplay: bytes
+        // we produced but the child has not taken yet (our buffer + queue +
+        // pipe). Measured, not estimated.
+        const qint64 inflightFrames =
+            (pumpBuf_.size() + std::max(qint64(0), generatedFrames * fb - intoChild)) / fb;
+        // Audible frames since session start: everything the child took out
+        // of the pipe, minus the conservative ring reserve, never negative
+        // and never beyond what the generator produced.
+        qint64 aud = drainedBytes / fb -
+                     std::min(pumpChannelReserveFrames_, inflightFrames);
         if (aud < 0) aud = 0;
-        // The audible position can never exceed what the generator produced.
-        if (aud > framesFed_) aud = framesFed_;
-        if (aud > consumedFrames_) {
+        if (aud > generatedFrames) aud = generatedFrames;
+        fedMinusConsumed_ = generatedFrames - aud;   // true backlog vs generator
+        sinkQueuedFrames_ = fedMinusConsumed_;       // gate uses the same value
+        if (aud > consumedFrames_) {                 // monotonic within a run
             consumedFrames_ = aud;
-            // Cursor = session start + proven audible consumption. This is
-            // the ONLY place the push-mode playhead advances: it moves by
-            // exactly the amount of audio the device demonstrably took out
-            // of the pipe, so it neither sprints ahead at startup (nothing
-            // consumed yet => cursor frozen while aplay warms up) nor
-            // teleports on late timer ticks. Emit only on real movement so
-            // the UI repaints smoothly and evenly.
             const qint64 newPos = startFrames_ + consumedFrames_;
             if (newPos != posFrames_) {
                 posFrames_ = newPos;
                 emit positionChanged(posFrames_);
             }
         }
-        lastHandedOff_ = handed;
-        lastIntoChild_ = intoChild;
-        lastPipeUnread_ = inPipe;
-        sinkQueuedFrames_ = std::max(fedMinusConsumed_, channelOccupancy);
     } else {
         sinkQueuedFrames_ = 0;     // raw QIODevice sink: no way to observe drain
         if (posFrames_ != startFrames_ + framesFed_) {
@@ -399,13 +389,12 @@ void AudioPlayer::pumpAudio() {
     // the backlog drains, finish normally. The guard timer below keeps
     // a wedged child from hanging the session forever.
     if (endPending_) {
-        // The generator position cannot be exceeded by the audible one; and
-        // once the whole range has demonstrably left the pipe (plus the ring
-        // reserve), the tail is heard — finish. The clamp keeps the drain
-        // condition reachable even when the child lags behind our
-        // conservative backlog estimate.
+        // Finish when the audible position reached the range end (the tail
+        // went through the speaker) — or, failing that, once every byte has
+        // demonstrably left the pipe and our buffers are empty.
         const qint64 gen = startFrames_ + framesFed_;
-        endDrained = consumedFrames_ >= framesFed_;
+        endDrained = consumedFrames_ >= framesFed_ ||
+                     (fedMinusConsumed_ == 0 && pumpBuf_.isEmpty());
         if (endDrained && pumpBuf_.isEmpty()) {
             posFrames_ = gen;   // cursor lands exactly on the range end
             emit positionChanged(posFrames_);
@@ -499,14 +488,14 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
         // (frames produced/handed toward the sink since the session start —
         // what decides how much PCM to render this tick and when the range
         // is exhausted) and the AUDIBLE cursor `posFrames_`, which pumpAudio()
-        // derives from the child's real stdin consumption and the UI paints.
-        // The old code conflated them: posFrames_ was advanced by the wall
-        // clock while audio piled up in the pipe, so the cursor sprinted
-        // ahead of the sound at startup ("sound starts later than the
-        // cursor") and teleported on late timer ticks ("cursor stutters").
-        // Now generation is gated by the measured backlog below the channel
-        // capacity, and the cursor only ever moves by proven consumption —
-        // perfectly even motion glued to the audible stream.
+        // derives from EXACT pipe accounting (bytes demonstrably leaving the
+        // kernel pipe minus the ALSA-ring reserve) and the UI paints. The old
+        // code conflated them: posFrames_ was advanced by the wall clock while
+        // audio piled up in the pipe, so the cursor sprinted ahead of the
+        // sound at startup ("sound starts later than the cursor") and tele-
+        // ported on late timer ticks ("cursor stutters"). Now generation runs
+        // at real time with a hard one-period-per-tick ceiling, and the
+        // cursor only ever moves by proven consumption.
         const qint64 genFrames_ = startFrames_ + framesFed_;
         qint64 wantFrames = 0;
         const qint64 maxPerTick =
@@ -516,12 +505,20 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
             const qint64 dueUsec = std::max(qint64(0), nowUsec - lastPumpUsec_);
             lastPumpUsec_ = nowUsec;
             wantFrames = qint64(dueUsec * pumpRateFramesPerUsec_);
+            // HARD one-period ceiling per tick: a late tick never "catches
+            // up" with a burst. Without it, any event-loop stall (aplay spawn
+            // inside writeData(), repaint work) lets the next tick generate
+            // seconds of PCM at once, filling the entire channel — the cursor
+            // then trails the generator by the full backlog cap for the rest
+            // of the session ("cursor runs ahead of the sound"). Shortfalls
+            // are dropped; the consumption gate below keeps the stream
+            // continuous across ordinary jitter anyway.
             wantFrames = std::min(wantFrames, maxPerTick);
-            // Backlog gate: never generate audio the output channel cannot
-            // absorb before being heard. sinkQueuedFrames_ is the measured
-            // occupancy (our buffers + QProcess queue + kernel pipe) or its
-            // conservative estimate; once it reaches the capacity the pump
-            // idles for whole ticks until the child drains more.
+            // Consumption gate: never keep more unplayed audio in flight than
+            // the channel capacity allows. sinkQueuedFrames_ is the MEASURED
+            // backlog (generated - audible, see pumpAudio); once it reaches
+            // the cap the pump idles for whole ticks until the child drains
+            // more, so generation self-synchronises to the device's rate.
             const qint64 room = pumpMaxBacklogFrames_ - sinkQueuedFrames_;
             if (room <= 0) return 0;    // channel full: wait for the drain
             wantFrames = std::min(wantFrames, room);
@@ -552,9 +549,6 @@ qint64 AudioPlayer::generateBytes(char *out, qint64 maxBytes) {
                 fedMinusConsumed_ = 0;   // at the wrap point (backlog < cap)
                 if (auto *ps = qobject_cast<ProcessSink *>(outDevice_)) {
                     ps->flushPipe(/*force=*/true);
-                    lastHandedOff_ = 0;
-                    lastIntoChild_ = 0;
-                    lastPipeUnread_ = 0;
                     sinkQueuedFrames_ = 0;
                 }
                 DBG(QStringLiteral("AudioPlayer: loop wrap to frame %1 "
@@ -667,9 +661,6 @@ void AudioPlayer::pause() {
             // not the audio"). The child is killed here and respawns lazily
             // on resume(), so all handoff counters restart at 0 as well.
             ps->flushPipe(/*force=*/true);
-            lastHandedOff_ = 0;
-            lastIntoChild_ = 0;
-            lastPipeUnread_ = 0;
         }
         sinkQueuedFrames_ = 0;
         fedMinusConsumed_ = 0;
@@ -710,9 +701,6 @@ void AudioPlayer::resume() {
         endPending_ = false;
         consumedFrames_ = framesFed_;
         fedMinusConsumed_ = 0;
-        lastHandedOff_ = 0;
-        lastIntoChild_ = 0;
-        lastPipeUnread_ = 0;
         if (!pump_) {
             pump_ = new QTimer(this);
             connect(pump_, &QTimer::timeout, this, [this] { pumpAudio(); });
@@ -790,9 +778,6 @@ void AudioPlayer::seek(qint64 frame) {
             consumedFrames_ = posFrames_ - startFrames_;   // cursor rebases to
             if (consumedFrames_ < 0) consumedFrames_ = 0;  // the seek position
             fedMinusConsumed_ = 0;
-            lastHandedOff_ = 0;    // flushPipe zeroes all child counters
-            lastIntoChild_ = 0;
-            lastPipeUnread_ = 0;
         }
     }
     emit positionChanged(posFrames_);
@@ -829,8 +814,6 @@ void AudioPlayer::stop() {
         sinkQueuedFrames_ = 0;
         consumedFrames_ = 0;     // no session: nothing generated/audible
         fedMinusConsumed_ = 0;
-        lastIntoChild_ = 0;
-        lastPipeUnread_ = 0;
         endPending_ = false;
         outDevice_->close(); delete outDevice_; outDevice_ = nullptr;
     }

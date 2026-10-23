@@ -35,9 +35,9 @@ public:
     // + aplay's ALSA ring) is invisible to us and can only be estimated from
     // consumption deltas; see AudioPlayer::pumpAudio().
     qint64 pendingBytes();
-    // Total bytes written into the CURRENT child since the last respawn/
-    // flushPipe(). Together with pendingBytes() it lets the push pump track
-    // how much audio the child has consumed (≈ played) between ticks.
+    // Total bytes the pump has accepted via write() into the CURRENT child
+    // since its spawn/last flushPipe(). Monotonic per child lifetime; reset
+    // to 0 when the child is killed and respawned.
     qint64 handedOffBytes() const { return handedOff_; }
     // Bytes the kernel pipe has ACTUALLY delivered to the child's stdin so
     // far (QProcess::bytesWritten — NOT bytesToWrite, which is only our own
@@ -47,10 +47,18 @@ public:
     // estimate exact for everything up to the pipe read end; only aplay's
     // own ring (~2 periods) remains an estimate.
     qint64 bytesIntoChild();
-    // Bytes still sitting between us and the child: unread data at the
-    // child's stdin pipe read end (the QProcess write buffer is counted
-    // separately by the pump — see handedOffBytes()).
+    // Exact unread byte count sitting in the KERNEL PIPE between us and the
+    // child's stdin read end, measured with ioctl(FIONREAD) on the write-end
+    // file descriptor (QProcess::ProcessChannel::StandardInput). This is the
+    // quantity the old model could only bound: without it the pump assumed
+    // the pipe was always full and credited the cursor with bytes merely
+    // accepted by write() ("cursor sprints ahead of the sound at startup").
+    // Returns 0 when the child is not running or the fd cannot be resolved.
     qint64 bytesInPipe();
+    // intoChild minus the still-unread pipe content: bytes the child has
+    // demonstrably pulled out of the pipe (into its ALSA ring / out of the
+    // speaker). The push pump drives the audible cursor from this counter.
+    qint64 auditedBytesIntoChild();
     // Zero the cumulative handoff counter: called whenever the child is
     // killed/respawned, so bytes in flight with the old process are not
     // counted against the fresh one.
@@ -75,6 +83,10 @@ private:
     bool started_ = false;     // child was successfully spawned at least once
     bool finishing_ = false;   // EOF sent; deferred SIGTERM escalation armed
     bool flushedRecently_ = false; // last spawn followed flushPipe(): warm start
+    // Cached write-end fd of the child's stdin pipe for FIONREAD occupancy
+    // measurement (see bytesInPipe()); re-resolved after every respawn.
+    int pipeFd_ = -1;
+    bool pipeFdValid_ = false;
 };
 
 // Build the "aplay" raw-PCM argument list for a format. The volume parameter

@@ -126,49 +126,62 @@ private:
     qint64 pumpBytesPerTick_ = 0;
     qint64 pumpFrameBytes_ = 0;
     int pumpPeriodMs_ = 20;
-    // Sink-capacity pacing for the push pump. The cursor must follow the
-    // AUDIBLE position, which trails the generated position by however much
-    // PCM is currently sitting in the output channel (aplay's stdin pipe +
-    // its ALSA ring buffer). A pure wall-clock pump ignores that reservoir:
-    // at start the whole channel depth gets filled "on credit" within the
-    // first few ticks (cursor sprints, then crawls, permanently ahead of the
-    // sound by up to ~0.7 s), and empty timer ticks make it stutter. Instead
-    // we cap the unplayed backlog at the channel capacity: generate one
-    // period per tick ONLY while the backlog is below capacity, and idle
-    // otherwise. Then the audible position equals posFrames_ minus a bounded
-    // constant delay, the cursor never sprints, and seeks/pauses can drop
-    // the backlog deterministically.
-    QElapsedTimer playClock_;      // monotonic session clock (diagnostics/idle guard)
+    // Push-mode generation pacing. The generator must not outrun real time:
+    // the audible cursor trails it by exactly the measured in-flight backlog
+    // (pumpBuf_ + QProcess queue + kernel pipe, see pumpAudio). If we fed
+    // faster than the device plays, that backlog would grow to the channel
+    // capacity (~64 KiB ≈ 0.7 s of S16 stereo @48k) and the cursor would sit
+    // permanently ~0.7 s behind the generator — perceived as "cursor runs
+    // ahead of the sound" because at startup the cursor is additionally held
+    // back while aplay primes its ALSA ring. Two hard rules keep the true
+    // in-flight latency at ~2 periods (~40 ms):
+    //  * each tick generates AT MOST one period (maxPerTick), regardless of
+    //    how much wall time elapsed since the previous tick — late ticks
+    //    (event-loop stalls, process spawn inside writeData()) drop their
+    //    shortfall instead of "catching up" with a burst that fills the
+    //    whole channel;
+    //  * the consumption gate caps the unplayed backlog below the channel
+    //    capacity so generation idles whenever the child lags behind.
+    QElapsedTimer playClock_;      // monotonic session clock (generation budget)
     qint64 clockBaseMs_ = 0;       // ms accumulated before the current run segment
-    qint64 framesFed_ = 0;         // total frames handed to the sink this session
+    qint64 framesFed_ = 0;         // total frames generated this session
     qint64 lastPumpUsec_ = 0;      // previous pump tick (µs on playClock_)
     double pumpRateFramesPerUsec_ = 0.0;  // sampleRate / 1000
-    qint64 pumpMaxBacklogFrames_ = 0;     // channel capacity in frames (pacing cap)
-    // Consumption tracking for the push pump (see AudioPlayer::pumpAudio):
-    // ProcessSink delivers observable counters — bytes accepted by write(),
-    // bytes actually delivered to the child's stdin, and bytes still sitting
-    // unread in the pipe. The push pump derives the AUDIBLE position from
-    // these; lastHandedOff_ keeps the previous tick's values for delta
-    // diagnostics around forced flushes/respawns of the child.
-    qint64 lastHandedOff_ = 0;
-    // Cursor model (push mode): posFrames_ IS the audible position — the UI
-    // paints it directly, so it must never be driven by the wall clock or by
-    // generation speed. Each tick derives how much audio the child actually
-    // consumed from its stdin (ProcessSink::bytesIntoChild delta, corrected
-    // by the unread-pipe level) and advances the cursor by exactly that
-    // amount. `consumedFrames_` counts consumption since the session start;
-    // `fedMinusConsumed_` is the conservative backlog estimate
-    // (generated/fed - consumed) capped at the measured channel occupancy
-    // (our buffers + pipe + aplay's ALSA ring, see pumpChannelReserveFrames_);
-    // the pacing gate keeps it under the channel capacity so the cursor
-    // tracks the sound with a bounded constant delay instead of sprinting
-    // ahead at startup and crawling afterwards. Seeks/pauses flush the
-    // channel and rebase all counters explicitly.
+    qint64 pumpMaxBacklogFrames_ = 0;     // hard gate: max unplayed backlog
+    qint64 pumpChannelReserveFrames_ = 0;  // aplay ALSA-ring estimate (frames)
+    // Cursor model (push mode) — EXACT consumption accounting. posFrames_ is
+    // what the UI paints, so it must equal the AUDIBLE position. Every byte
+    // of session audio lives in exactly one place:
+    //   our pumpBuf_  ->  QProcess queue  ->  kernel pipe  ->  aplay's ALSA
+    //   ring          ->  the speaker.
+    // ProcessSink measures the first three stages exactly each tick:
+    //   handedOff  = bytes accepted by write() into the current child
+    //   intoChild  = handedOff - QProcess queue   (left our process)
+    //   pipeUnread = FIONREAD on the pipe fd      (still unread by aplay)
+    // so "bytes the child demonstrably pulled out of the pipe" is exact:
+    //   drained = intoChild - pipeUnread
+    // and the audible frame position is drained minus a bounded estimate of
+    // aplay's ALSA ring (reserve). All earlier models got one of these
+    // corrections wrong and produced exactly the reported bugs:
+    //  * wall-clock cursor pacing ignored the sink state entirely — during
+    //    aplay's device-open window the cursor already ran at full speed
+    //    ("sound starts later than the cursor");
+    //  * handoff-delta pacing credited the cursor with bytes merely accepted
+    //    by write(); the first chunk fills the whole 64 KiB pipe instantly
+    //    and the cursor sprinted ahead for good;
+    //  * the reserve-only variant still over-credited while the generator
+    //    lagged behind real time, because it measured against `generated`,
+    //    not against bytes demonstrably leaving the pipe.
+    // Now the cursor parks at the play start until bytes physically leave
+    // the pipe, then advances in lockstep with the device — evenly, because
+    // the drain rate IS the sample rate. consumedFrames_ counts audible
+    // frames since the session start; fedMinusConsumed_ is the measured
+    // backlog (generated - audible) used by the generation gate;
+    // endPending_ waits for the audible tail to reach the range end before
+    // finishing, so the cursor lands exactly on the end when the tail goes
+    // silent instead of teleporting back while stale audio still sounds.
     qint64 consumedFrames_ = 0;
     qint64 fedMinusConsumed_ = 0;
-    qint64 lastIntoChild_ = 0;     // bytesIntoChild() at the previous tick
-    qint64 lastPipeUnread_ = 0;    // bytesInPipe() at the previous tick
-    qint64 pumpChannelReserveFrames_ = 0;  // aplay's ALSA ring estimate (frames)
     bool endPending_ = false;             // range generated, waiting for the
                                           // audible tail to drain before
                                           // declaring finished()

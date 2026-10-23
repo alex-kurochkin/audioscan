@@ -8,6 +8,9 @@
 #include <QStandardPaths>
 #include <algorithm>
 #include <cmath>
+// FIONREAD on the child-stdin pipe fd (exact unread-pipe measurement, see
+// ProcessSink::bytesInPipe()). POSIX only — this project targets Linux/Debian.
+#include <sys/ioctl.h>
 
 namespace {
 // Resolve an external player up front. QProcess::start() succeeds even when
@@ -98,12 +101,65 @@ qint64 ProcessSink::bytesIntoChild() {
 }
 
 qint64 ProcessSink::bytesInPipe() {
-    // Unread data at the child's read end of the kernel pipe cannot be
-    // observed through QProcess's public API (it owns the write end only).
-    // The pump therefore works with the exact derived quantities above plus
-    // a bounded estimate for the pipe/ring; keeping this entry point returns
-    // zero makes that split explicit rather than double-counting the queue.
-    return 0;
+    // EXACT unread byte count at the child's read end of the kernel stdin
+    // pipe, measured with ioctl(FIONREAD). QProcess offers no API for this
+    // (it owns only the write end's buffering), so we ask the kernel through
+    // /proc: every fd of ours that is a `pipe:` inode whose `fd:` link target
+    // is the child's read end IS our write end of that same pipe — FIONREAD
+    // on it returns precisely the bytes buffered between the two ends. This
+    // closes the blind spot that made every previous cursor model wrong:
+    // without it the pump could not tell "aplay consumed my bytes" from "my
+    // bytes merely filled the 64 KiB pipe while aplay is still opening the
+    // device" — the cursor credited itself with the whole pipe depth at
+    // startup (~0.7 s of S16 stereo @48k) and ran ahead of the sound.
+    // Consumption is then exact:
+    //     drained = intoChild - bytesInPipe()
+    if (!pipeFdValid_) {
+        if (!proc_ || proc_->state() != QProcess::Running) return 0;
+        const qint64 pid = proc_->processId();
+        if (pid <= 0) return 0;
+        // Resolve the child's stdin target once per child lifetime.
+        char link[64];
+        std::snprintf(link, sizeof(link), "/proc/%lld/fd/0",
+                      static_cast<long long>(pid));
+        char childStdin[256];
+        const ssize_t n = ::readlink(link, childStdin, sizeof(childStdin) - 1);
+        if (n <= 0) return 0;
+        childStdin[n] = '\0';
+        // Find OUR fd that points at the same pipe inode.
+        int found = -1;
+        QDir fdDir(QStringLiteral("/proc/self/fd"));
+        const QStringList fds = fdDir.entryList(QDir::NoDotAndDotDot | QDir::System);
+        for (const QString &name : fds) {
+            bool ok = false;
+            const int fd = name.toInt(&ok);
+            if (!ok || fd < 0) continue;
+            char target[256];
+            std::snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+            const ssize_t m = ::readlink(link, target, sizeof(target) - 1);
+            if (m <= 0) continue;
+            target[m] = '\0';
+            if (std::strcmp(target, childStdin) == 0) { found = fd; break; }
+        }
+        if (found < 0) return 0;
+        int probe = 0;
+        if (ioctl(found, FIONREAD, &probe) < 0) return 0;
+        pipeFd_ = found;
+        pipeFdValid_ = true;
+    }
+    int n = 0;
+    if (ioctl(pipeFd_, FIONREAD, &n) < 0) {
+        pipeFdValid_ = false;   // fd died with the child: re-resolve next tick
+        return 0;
+    }
+    return std::max(0, n);
+}
+
+qint64 ProcessSink::auditedBytesIntoChild() {
+    // Bytes the child has DEMONSTRABLY removed from the pipe: everything it
+    // ever received minus what is still sitting there unread. Monotonic by
+    // construction within one child lifetime (intoChild grows, pipe drains).
+    return std::max(qint64(0), bytesIntoChild() - bytesInPipe());
 }
 
 qint64 ProcessSink::pendingBytes() {
@@ -158,6 +214,7 @@ void ProcessSink::flushPipe(bool force) {
     delete proc_;                        // reap synchronously; no orphan
     proc_ = nullptr;
     started_ = false;                    // ensureStarted() respawns lazily
+    pipeFdValid_ = false;                // fd died with the child
     // Everything in flight (QProcess queue + kernel pipe) died with the
     // child: restart the handoff accounting so the fresh process starts
     // from an empty backlog.
@@ -222,6 +279,7 @@ bool ProcessSink::ensureStarted() {
     proc_ = new QProcess(this);
     proc_->setProgram(program_);
     proc_->setArguments(args_);
+    pipeFdValid_ = false;   // fresh child: re-resolve the stdin pipe fd lazily
     // Keep stderr separate (do NOT use MergedChannels): anything the child
     // writes to stderr ("aplay: sound.c:341: failed reason..." etc.) lands in
     // the readyReadStandardError buffer and is logged on failure below.
