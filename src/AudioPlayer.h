@@ -144,6 +144,14 @@ private:
     qint64 lastPumpUsec_ = 0;      // previous pump tick (µs on playClock_)
     double pumpRateFramesPerUsec_ = 0.0;  // sampleRate / 1000
     qint64 pumpMaxBacklogFrames_ = 0;     // channel capacity in frames (pacing cap)
+    // Consumption tracking for the push pump (see AudioPlayer::pumpAudio):
+    // ProcessSink's cumulative handoff counter as observed on the previous
+    // tick; its delta is what the child took from our write buffer into the
+    // kernel pipe/ALSA ring since then. audibleFrames_ is the running maximum
+    // of (generated - backlog): the drain estimate can only ever grow while a
+    // session plays, so seeks/pauses must rebase it explicitly.
+    qint64 lastHandedOff_ = 0;
+    qint64 audibleFrames_ = 0;
     bool endPending_ = false;             // range generated, waiting for the
                                           // audible tail to drain before
                                           // declaring finished()

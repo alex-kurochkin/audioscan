@@ -82,20 +82,15 @@ void ProcessSink::restartWithArgs(const QStringList &newArgs) {
 
 qint64 ProcessSink::readData(char *, qint64) { return 0; }
 
-qint64 ProcessSink::discardBuffered() {
-    // Bytes the child has not actually played yet: QProcess's own queue
-    // plus everything sitting in the kernel pipe. The pipe is invisible to
-    // QProcess (bytesToWrite() drops to 0 once the OS accepted the bytes),
-    // but aplay may still have up to a full pipe (~64 KiB) of unplayed audio
-    // in it — that blind spot previously made AudioPlayer believe the
-    // backlog had drained instantly and sprint the cursor ahead of the
-    // sound. handedOff_ counts every byte ever written into the *current*
-    // child; resetHandoff() zeroes it whenever the child is killed/respawned
-    // (flushPipe), because everything in flight dies with the old process.
+qint64 ProcessSink::pendingBytes() {
+    // Bytes still queued at OUR side: QProcess's write buffer holds data
+    // accepted by write() but not yet handed to the kernel pipe. This is
+    // NON-destructive bookkeeping — the pump calls it every tick, so it must
+    // NOT touch handedOff_ (the old discardBuffered() estimate conflated the
+    // two counters and could never see the child consuming anything once the
+    // kernel pipe filled up).
     if (!proc_) return 0;
-    const qint64 queued = proc_->bytesToWrite();
-    const qint64 inPipe = handedOff_ - queued;   // >=0: accepted by the kernel
-    return queued + std::max(inPipe, qint64(0));
+    return proc_->bytesToWrite();
 }
 
 void ProcessSink::resetHandoff() {

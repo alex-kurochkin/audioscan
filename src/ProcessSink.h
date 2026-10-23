@@ -29,9 +29,16 @@ public:
     // up to ~0.5 s of audio from the OLD position, which must not keep
     // playing after a click-to-seek ("cursor jumps late" symptom).
     void flushPipe(bool force = false);
-    // Bytes handed to the child that it has not played yet (QProcess queue +
-    // kernel pipe estimate). Used by the push pump for backlog accounting.
-    qint64 discardBuffered();
+    // Bytes still queued at OUR side (QProcess write buffer): accepted by
+    // write() but not yet handed to the kernel pipe. Non-destructive — safe
+    // to call on every pump tick. Everything beyond this point (kernel pipe
+    // + aplay's ALSA ring) is invisible to us and can only be estimated from
+    // consumption deltas; see AudioPlayer::pumpAudio().
+    qint64 pendingBytes();
+    // Total bytes written into the CURRENT child since the last respawn/
+    // flushPipe(). Together with pendingBytes() it lets the push pump track
+    // how much audio the child has consumed (≈ played) between ticks.
+    qint64 handedOffBytes() const { return handedOff_; }
     // Zero the cumulative handoff counter: called whenever the child is
     // killed/respawned, so bytes in flight with the old process are not
     // counted against the fresh one.
